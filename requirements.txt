@@ -1,0 +1,23 @@
+# FastAPI and server
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# LangGraph and LangChain
+langgraph==0.0.20
+langchain==0.1.0
+langchain-openai==0.0.2
+langchain-google-genai==0.0.3
+langchain-pinecone==0.0.1
+
+# Pinecone
+pinecone-client>=3,<4
+
+# Configuration and validation
+python-dotenv==1.0.0
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# Utilities
+python-multipart==0.0.6
+slowapi==0.1.9
+

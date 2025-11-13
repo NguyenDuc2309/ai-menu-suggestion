@@ -1,0 +1,486 @@
+[
+  {
+    "name": "thịt heo",
+    "quantity": 500,
+    "price": 150000,
+    "unit": "g",
+    "category": "tươi"
+  },
+  {
+    "name": "thịt bò",
+    "quantity": 300,
+    "price": 200000,
+    "unit": "g",
+    "category": "tươi"
+  },
+  {
+    "name": "thịt gà",
+    "quantity": 1000,
+    "price": 120000,
+    "unit": "g",
+    "category": "tươi"
+  },
+  {
+    "name": "thịt vịt",
+    "quantity": 800,
+    "price": 140000,
+    "unit": "g",
+    "category": "tươi"
+  },
+  {
+    "name": "thịt cừu",
+    "quantity": 400,
+    "price": 250000,
+    "unit": "g",
+    "category": "tươi"
+  },
+  {
+    "name": "cá basa",
+    "quantity": 500,
+    "price": 100000,
+    "unit": "g",
+    "category": "tươi"
+  },
+  {
+    "name": "cá hồi",
+    "quantity": 300,
+    "price": 350000,
+    "unit": "g",
+    "category": "tươi"
+  },
+  {
+    "name": "cá thu",
+    "quantity": 400,
+    "price": 120000,
+    "unit": "g",
+    "category": "tươi"
+  },
+  {
+    "name": "tôm sú",
+    "quantity": 300,
+    "price": 180000,
+    "unit": "g",
+    "category": "tươi"
+  },
+  {
+    "name": "tôm thẻ",
+    "quantity": 500,
+    "price": 150000,
+    "unit": "g",
+    "category": "tươi"
+  },
+  {
+    "name": "mực",
+    "quantity": 400,
+    "price": 160000,
+    "unit": "g",
+    "category": "tươi"
+  },
+  {
+    "name": "cua",
+    "quantity": 2,
+    "price": 200000,
+    "unit": "con",
+    "category": "tươi"
+  },
+  {
+    "name": "nghêu",
+    "quantity": 1000,
+    "price": 80000,
+    "unit": "g",
+    "category": "tươi"
+  },
+  {
+    "name": "rau cải",
+    "quantity": 500,
+    "price": 20000,
+    "unit": "g",
+    "category": "tươi"
+  },
+  {
+    "name": "rau muống",
+    "quantity": 500,
+    "price": 15000,
+    "unit": "g",
+    "category": "tươi"
+  },
+  {
+    "name": "rau dền",
+    "quantity": 400,
+    "price": 18000,
+    "unit": "g",
+    "category": "tươi"
+  },
+  {
+    "name": "rau ngót",
+    "quantity": 300,
+    "price": 25000,
+    "unit": "g",
+    "category": "tươi"
+  },
+  {
+    "name": "cà chua",
+    "quantity": 500,
+    "price": 30000,
+    "unit": "g",
+    "category": "tươi"
+  },
+  {
+    "name": "dưa chuột",
+    "quantity": 600,
+    "price": 25000,
+    "unit": "g",
+    "category": "tươi"
+  },
+  {
+    "name": "cà tím",
+    "quantity": 400,
+    "price": 35000,
+    "unit": "g",
+    "category": "tươi"
+  },
+  {
+    "name": "ớt chuông",
+    "quantity": 300,
+    "price": 40000,
+    "unit": "g",
+    "category": "tươi"
+  },
+  {
+    "name": "hành tây",
+    "quantity": 500,
+    "price": 25000,
+    "unit": "g",
+    "category": "tươi"
+  },
+  {
+    "name": "hành lá",
+    "quantity": 200,
+    "price": 15000,
+    "unit": "g",
+    "category": "tươi"
+  },
+  {
+    "name": "tỏi",
+    "quantity": 200,
+    "price": 10000,
+    "unit": "g",
+    "category": "tươi"
+  },
+  {
+    "name": "gừng",
+    "quantity": 200,
+    "price": 15000,
+    "unit": "g",
+    "category": "tươi"
+  },
+  {
+    "name": "cà rốt",
+    "quantity": 500,
+    "price": 30000,
+    "unit": "g",
+    "category": "tươi"
+  },
+  {
+    "name": "khoai tây",
+    "quantity": 1000,
+    "price": 35000,
+    "unit": "g",
+    "category": "tươi"
+  },
+  {
+    "name": "khoai lang",
+    "quantity": 800,
+    "price": 30000,
+    "unit": "g",
+    "category": "tươi"
+  },
+  {
+    "name": "bắp cải",
+    "quantity": 1000,
+    "price": 25000,
+    "unit": "g",
+    "category": "tươi"
+  },
+  {
+    "name": "bông cải xanh",
+    "quantity": 400,
+    "price": 45000,
+    "unit": "g",
+    "category": "tươi"
+  },
+  {
+    "name": "nấm hương",
+    "quantity": 200,
+    "price": 50000,
+    "unit": "g",
+    "category": "tươi"
+  },
+  {
+    "name": "nấm rơm",
+    "quantity": 300,
+    "price": 40000,
+    "unit": "g",
+    "category": "tươi"
+  },
+  {
+    "name": "đậu phụ",
+    "quantity": 500,
+    "price": 25000,
+    "unit": "g",
+    "category": "chay"
+  },
+  {
+    "name": "đậu hũ non",
+    "quantity": 300,
+    "price": 30000,
+    "unit": "g",
+    "category": "chay"
+  },
+  {
+    "name": "đậu nành",
+    "quantity": 500,
+    "price": 40000,
+    "unit": "g",
+    "category": "chay"
+  },
+  {
+    "name": "đậu xanh",
+    "quantity": 500,
+    "price": 35000,
+    "unit": "g",
+    "category": "chay"
+  },
+  {
+    "name": "đậu đen",
+    "quantity": 500,
+    "price": 30000,
+    "unit": "g",
+    "category": "chay"
+  },
+  {
+    "name": "mì căn",
+    "quantity": 300,
+    "price": 45000,
+    "unit": "g",
+    "category": "chay"
+  },
+  {
+    "name": "chả chay",
+    "quantity": 200,
+    "price": 50000,
+    "unit": "g",
+    "category": "chay"
+  },
+  {
+    "name": "nấm đông cô",
+    "quantity": 150,
+    "price": 60000,
+    "unit": "g",
+    "category": "chay"
+  },
+  {
+    "name": "tôm đông lạnh",
+    "quantity": 500,
+    "price": 120000,
+    "unit": "g",
+    "category": "đông lạnh"
+  },
+  {
+    "name": "cá đông lạnh",
+    "quantity": 600,
+    "price": 80000,
+    "unit": "g",
+    "category": "đông lạnh"
+  },
+  {
+    "name": "thịt heo đông lạnh",
+    "quantity": 500,
+    "price": 130000,
+    "unit": "g",
+    "category": "đông lạnh"
+  },
+  {
+    "name": "rau củ đông lạnh",
+    "quantity": 500,
+    "price": 35000,
+    "unit": "g",
+    "category": "đông lạnh"
+  },
+  {
+    "name": "khoai tây chiên đông lạnh",
+    "quantity": 500,
+    "price": 45000,
+    "unit": "g",
+    "category": "đông lạnh"
+  },
+  {
+    "name": "bánh bao đông lạnh",
+    "quantity": 10,
+    "price": 80000,
+    "unit": "cái",
+    "category": "đông lạnh"
+  },
+  {
+    "name": "cá hộp",
+    "quantity": 5,
+    "price": 25000,
+    "unit": "hộp",
+    "category": "đóng hộp"
+  },
+  {
+    "name": "thịt hộp",
+    "quantity": 4,
+    "price": 35000,
+    "unit": "hộp",
+    "category": "đóng hộp"
+  },
+  {
+    "name": "đậu hộp",
+    "quantity": 6,
+    "price": 20000,
+    "unit": "hộp",
+    "category": "đóng hộp"
+  },
+  {
+    "name": "ngô đóng hộp",
+    "quantity": 5,
+    "price": 25000,
+    "unit": "hộp",
+    "category": "đóng hộp"
+  },
+  {
+    "name": "nấm đóng hộp",
+    "quantity": 4,
+    "price": 30000,
+    "unit": "hộp",
+    "category": "đóng hộp"
+  },
+  {
+    "name": "cà chua đóng hộp",
+    "quantity": 5,
+    "price": 28000,
+    "unit": "hộp",
+    "category": "đóng hộp"
+  },
+  {
+    "name": "nước mắm",
+    "quantity": 500,
+    "price": 40000,
+    "unit": "ml",
+    "category": "gia vị"
+  },
+  {
+    "name": "dầu ăn",
+    "quantity": 500,
+    "price": 35000,
+    "unit": "ml",
+    "category": "gia vị"
+  },
+  {
+    "name": "muối",
+    "quantity": 500,
+    "price": 10000,
+    "unit": "g",
+    "category": "gia vị"
+  },
+  {
+    "name": "đường",
+    "quantity": 500,
+    "price": 20000,
+    "unit": "g",
+    "category": "gia vị"
+  },
+  {
+    "name": "hạt nêm",
+    "quantity": 200,
+    "price": 30000,
+    "unit": "g",
+    "category": "gia vị"
+  },
+  {
+    "name": "kimchi",
+    "quantity": 500,
+    "price": 80000,
+    "unit": "g",
+    "category": "gia vị"
+  },
+  {
+    "name": "gochujang",
+    "quantity": 200,
+    "price": 50000,
+    "unit": "g",
+    "category": "gia vị"
+  },
+  {
+    "name": "tương ớt",
+    "quantity": 300,
+    "price": 25000,
+    "unit": "g",
+    "category": "gia vị"
+  },
+  {
+    "name": "xì dầu",
+    "quantity": 500,
+    "price": 35000,
+    "unit": "ml",
+    "category": "gia vị"
+  },
+  {
+    "name": "gạo",
+    "quantity": 2000,
+    "price": 50000,
+    "unit": "g",
+    "category": "tinh bột"
+  },
+  {
+    "name": "mì tôm",
+    "quantity": 10,
+    "price": 30000,
+    "unit": "gói",
+    "category": "tinh bột"
+  },
+  {
+    "name": "bún",
+    "quantity": 500,
+    "price": 20000,
+    "unit": "g",
+    "category": "tinh bột"
+  },
+  {
+    "name": "phở",
+    "quantity": 500,
+    "price": 25000,
+    "unit": "g",
+    "category": "tinh bột"
+  },
+  {
+    "name": "bánh mì",
+    "quantity": 10,
+    "price": 50000,
+    "unit": "ổ",
+    "category": "tinh bột"
+  },
+  {
+    "name": "trứng gà",
+    "quantity": 20,
+    "price": 30000,
+    "unit": "quả",
+    "category": "tươi"
+  },
+  {
+    "name": "trứng vịt",
+    "quantity": 15,
+    "price": 35000,
+    "unit": "quả",
+    "category": "tươi"
+  },
+  {
+    "name": "sữa tươi",
+    "quantity": 1000,
+    "price": 40000,
+    "unit": "ml",
+    "category": "tươi"
+  }
+]
+
