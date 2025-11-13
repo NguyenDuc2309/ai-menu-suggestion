@@ -26,8 +26,12 @@ class MenuGraphState(TypedDict):
     # Error handling
     error: Optional[str]
     
-    # Iteration counter (kept for compatibility, not used in simplified flow)
+    # Iteration counter for adjustment loop
     iteration_count: int
+    
+    # Budget validation
+    needs_adjustment: Optional[bool]
+    budget_error: Optional[str]
     
     # LLM usage tracking
     llm_usage: Optional[List[Dict[str, Any]]]

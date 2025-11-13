@@ -15,16 +15,17 @@ GENERATE_MENU_PROMPT = """You are a menu planning expert. Generate a complete me
 CRITICAL BUDGET CONSTRAINT: The TOTAL PRICE of ALL dishes MUST NOT exceed {budget} VND. This is ABSOLUTE and NON-NEGOTIABLE.
 
 Your task (in this exact order):
-1. FIRST: Calculate the cost of each available ingredient per unit from the list
+1. FIRST: Read the base price (price per unit) of each available ingredient from the list
 2. SECOND: Use combination rules to identify possible dishes
 3. THIRD: For each possible dish, calculate total cost BEFORE adding it to menu
 4. FOURTH: Only select dishes whose total cost keeps you UNDER the budget limit
 5. FIFTH: Verify total_price <= {budget} VND before returning
 
 PRICE CALCULATION RULES (MANDATORY):
-- Each ingredient has a "price" field which is the price PER UNIT (per gram/ml/etc)
-- To calculate ingredient cost: ingredient_cost = price_per_unit × quantity_used
-- Example: If "cá basa" has price: 100000 VND per gram, and you use 200g, then cost = 100000 × 200 = 20,000,000 VND
+- Each ingredient shows "Giá mỗi [unit]: X VND" which is the BASE PRICE per unit
+- To calculate ingredient cost: ingredient_cost = base_price_per_unit × quantity_used
+- Example: If "thịt heo" has "Giá mỗi g: 300 VND", using 200g costs = 300 × 200 = 60,000 VND
+- Example: If "bánh mì" has "Giá mỗi ổ: 5000 VND", using 2 ổ costs = 5000 × 2 = 10,000 VND
 - Each dish price = sum of all ingredient costs in that dish
 - Total menu price = sum of all dish prices
 
@@ -63,11 +64,12 @@ VERIFICATION CHECKLIST (MUST PASS ALL):
 ✓ All quantities <= available stock quantities
 
 EXAMPLE CALCULATION (Budget: 100,000 VND):
-- If "cá basa" costs 100,000 VND per gram, using 200g = 100,000 × 200 = 20,000,000 VND (TOO EXPENSIVE - REJECT)
-- If "cá basa" costs 100,000 VND per gram, using 0.5g = 100,000 × 0.5 = 50,000 VND (OK if other dishes fit remaining 50,000)
-- If "hành lá" costs 15,000 VND per gram, using 5g = 15,000 × 5 = 75,000 VND (TOO EXPENSIVE for small budget)
-- If "hành lá" costs 15,000 VND per gram, using 1g = 15,000 × 1 = 15,000 VND (OK)
-- Strategy: For small budgets, use TINY quantities of expensive ingredients or choose cheaper alternatives
+- If "cá basa" costs 200 VND/g, using 200g = 200 × 200 = 40,000 VND (OK)
+- If "thịt heo" costs 300 VND/g, using 150g = 300 × 150 = 45,000 VND (OK)
+- If "rau muống" costs 30 VND/g, using 100g = 30 × 100 = 3,000 VND (OK)
+- Total for 3 dishes = 40,000 + 45,000 + 3,000 = 88,000 VND (UNDER 100k budget - GOOD!)
+- If "cá hồi" costs 1167 VND/g, using 200g = 1167 × 200 = 233,400 VND (TOO EXPENSIVE - REJECT)
+- Strategy: For small budgets, choose cheaper ingredients (thịt gà, cá basa, rau) and use reasonable portions
 
 Cuisine type: {cuisine}
 Budget: {budget} VND (MAXIMUM - DO NOT EXCEED - THIS IS A HARD LIMIT)
@@ -80,42 +82,48 @@ Ingredient combination rules:
 
 Generate a menu by applying these rules. REMEMBER: total_price MUST be <= {budget} VND."""
 
-ADJUST_MENU_PROMPT = """You are a menu adjustment expert. Adjust the menu to fix validation errors.
-You can:
-- Reduce quantities of ingredients
-- Replace ingredients with available alternatives
-- Remove dishes if necessary
-- Ensure total price <= budget
+ADJUST_MENU_PROMPT = """You are a menu adjustment expert. Adjust the menu to fit within budget constraints.
 
-Return ONLY a valid JSON object with the same structure as the input menu:
+Your task:
+1. Identify which dishes or ingredients are too expensive
+2. Apply one or more strategies:
+   - Reduce quantities of expensive ingredients (especially protein)
+   - Replace expensive ingredients with cheaper alternatives (e.g., cá hồi → cá basa, thịt bò → thịt gà)
+   - Remove optional dishes (side dishes, soup) and keep only main dish
+   - Use smaller portions
+3. Ensure total_price <= {budget} VND
+
+PRICE CALCULATION (MANDATORY):
+- Each ingredient has base_price per unit shown as "Giá mỗi [unit]: X VND"
+- Calculate: ingredient_cost = base_price × quantity_used
+- Example: "thịt heo" costs 300 VND/g, using 100g = 300 × 100 = 30,000 VND
+- Dish price = sum of all ingredient costs
+- Total price = sum of all dish prices
+
+Return ONLY a valid JSON object with this structure:
 {{
     "items": [
         {{
             "name": "Dish name",
             "ingredients": [
-                {{"name": "ingredient name", "quantity": number, "unit": "g|kg|ml|etc", "price": price_in_vnd}}
+                {{"name": "ingredient name", "quantity": number, "unit": "g|kg|ml|etc", "price": calculated_price}}
             ],
-            "price": estimated_price_in_vnd
+            "price": dish_total_price
         }}
     ],
-    "total_price": total_price_in_vnd
+    "total_price": menu_total_price
 }}
 
-IMPORTANT:
-- Calculate price for each ingredient: price = (price_per_unit from available list) * quantity_used
-- Example: If hành lá costs 75 VND per gram (15000 VND per gram in stock), then 20g costs 75 * 20 = 1500 VND
-- Each dish's price should be the sum of all ingredient prices used in that dish
-
-Current menu:
+Current menu (OVER BUDGET):
 {menu}
 
-Validation errors:
+Budget error:
 {errors_text}
 
 Available ingredients:
 {ingredients_text}
 
-Budget: {budget} VND
+Budget limit: {budget} VND (MUST NOT EXCEED)
 
 Adjust the menu:"""
 

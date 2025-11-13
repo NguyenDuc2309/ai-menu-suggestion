@@ -222,14 +222,14 @@ class LLMService:
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         start_time = time.time()
         # Format ingredients list
-        # price is already price per unit, quantity is stock
+        # base_price is price per unit, quantity is stock
         ingredients_list = []
         for ing in ingredients:
             quantity = ing['quantity']  # stock quantity
-            price = ing['price']  # price per unit
+            base_price = ing['base_price']  # price per unit
             unit = ing.get('unit', 'g')
             ingredients_list.append(
-                f"- {ing['name']}: {quantity} {unit} tồn kho (Giá mỗi {unit}: {price} VND)"
+                f"- {ing['name']}: {quantity} {unit} tồn kho (Giá mỗi {unit}: {base_price} VND)"
             )
         ingredients_text = "\n".join(ingredients_list)
         
@@ -359,14 +359,14 @@ class LLMService:
         errors_text = "\n".join([f"- {err}" for err in validation_errors])
         
         # Format available ingredients
-        # price is already price per unit, quantity is stock
+        # base_price is price per unit, quantity is stock
         ingredients_list = []
         for ing in available_ingredients:
             quantity = ing['quantity']  # stock quantity
-            price = ing['price']  # price per unit
+            base_price = ing['base_price']  # price per unit
             unit = ing.get('unit', 'g')
             ingredients_list.append(
-                f"- {ing['name']}: {quantity} {unit} tồn kho (Giá mỗi {unit}: {price} VND)"
+                f"- {ing['name']}: {quantity} {unit} tồn kho (Giá mỗi {unit}: {base_price} VND)"
             )
         ingredients_text = "\n".join(ingredients_list)
         

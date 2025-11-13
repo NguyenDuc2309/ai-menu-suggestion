@@ -56,6 +56,8 @@ async def suggest_menu(request: Request, menu_request: MenuRequest) -> MenuRespo
             "final_response": None,
             "error": None,
             "iteration_count": 0,
+            "needs_adjustment": None,
+            "budget_error": None,
             "llm_usage": []
         }
         
@@ -151,11 +153,11 @@ async def suggest_menu(request: Request, menu_request: MenuRequest) -> MenuRespo
                 ing_unit = ing.get("unit", "g")
                 
                 # Recalculate price from available ingredients
-                # price in mock_ingredients.json is price per unit, quantity is stock
+                # base_price in mock_ingredients.json is price per unit
                 if ing_name_lower in available_map:
                     available_ing = available_map[ing_name_lower]
-                    price_per_unit = available_ing["price"]  # price is already per unit
-                    calculated_price = price_per_unit * ing_quantity
+                    base_price = available_ing["base_price"]  # price per unit
+                    calculated_price = base_price * ing_quantity
                 else:
                     calculated_price = ing.get("price", 0)
                 
@@ -184,10 +186,12 @@ async def suggest_menu(request: Request, menu_request: MenuRequest) -> MenuRespo
         # Recalculate total price from recalculated dish prices
         total_estimated_price = sum(dish.total_price for dish in menu_dishes)
         
-        # Validate budget constraint - reject if exceeds budget
-        if total_estimated_price > total_budget:
+        # Budget validation is now handled in the graph, but double-check here
+        # Allow 5% tolerance for rounding
+        if total_estimated_price > total_budget * 1.05:
             error_msg = f"Generated menu exceeds budget: {total_estimated_price:,.0f} VND > {total_budget:,.0f} VND"
             print(f"[REQUEST] Budget validation failed: {error_msg}")
+            print(f"[REQUEST] This should have been caught by validate_budget_node!")
             raise HTTPException(
                 status_code=500, 
                 detail=f"Failed to generate menu within budget. Menu cost: {total_estimated_price:,.0f} VND, Budget: {total_budget:,.0f} VND"

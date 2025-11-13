@@ -84,6 +84,69 @@ def query_ingredients_node(state: MenuGraphState) -> MenuGraphState:
     return state
 
 
+def prefilter_ingredients_by_budget_node(state: MenuGraphState) -> MenuGraphState:
+    """Filter ingredients based on budget to reduce LLM context size."""
+    print("[STEP] prefilter_ingredients: Starting...")
+    # Check for errors from previous steps
+    if state.get("error"):
+        print("[STEP] prefilter_ingredients: Error detected in state, skipping")
+        return state
+    
+    try:
+        intent = state.get("intent", {})
+        budget = intent.get("budget", 200000)
+        all_ingredients = state.get("available_ingredients", [])
+        
+        # Sort ingredients by base_price (cheapest first)
+        sorted_ingredients = sorted(all_ingredients, key=lambda x: x.get("base_price", 0))
+        
+        # Budget-based filtering strategy
+        if budget < 150000:
+            # Very tight budget: only cheap ingredients
+            max_base_price = 200  # Max 200 VND per unit
+            print(f"[STEP] prefilter_ingredients: Tight budget ({budget} VND), filtering for base_price <= {max_base_price}")
+        elif budget < 500000:
+            # Medium budget: cheap to medium ingredients
+            max_base_price = 500
+            print(f"[STEP] prefilter_ingredients: Medium budget ({budget} VND), filtering for base_price <= {max_base_price}")
+        else:
+            # Large budget: all ingredients
+            max_base_price = float('inf')
+            print(f"[STEP] prefilter_ingredients: Large budget ({budget} VND), using all ingredients")
+        
+        # Filter ingredients
+        filtered = []
+        
+        # Always include essential ingredients (gia vị, tinh bột)
+        essentials = [ing for ing in sorted_ingredients if ing.get("category") in ["gia vị", "tinh bột"]]
+        filtered.extend(essentials[:15])  # Limit essentials to 15
+        
+        # Add affordable proteins and vegetables
+        non_essentials = [ing for ing in sorted_ingredients 
+                         if ing.get("category") not in ["gia vị", "tinh bột"] 
+                         and ing.get("base_price", 0) <= max_base_price]
+        
+        # Limit to 35 non-essential ingredients
+        filtered.extend(non_essentials[:35])
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_filtered = []
+        for ing in filtered:
+            if ing["name"] not in seen:
+                seen.add(ing["name"])
+                unique_filtered.append(ing)
+        
+        state["available_ingredients"] = unique_filtered
+        print(f"[STEP] prefilter_ingredients: Success - filtered from {len(all_ingredients)} to {len(unique_filtered)} ingredients")
+        
+    except Exception as e:
+        error_msg = f"Error prefiltering ingredients: {str(e)}"
+        print(f"[STEP] prefilter_ingredients: FAILED - {error_msg}")
+        state["error"] = error_msg
+    return state
+
+
 def retrieve_rules_and_generate_menu_node(state: MenuGraphState) -> MenuGraphState:
     """Retrieve ingredient combination rules from Pinecone and generate menu."""
     print("[STEP] retrieve_rules_and_generate_menu: Starting...")
@@ -150,7 +213,105 @@ def retrieve_rules_and_generate_menu_node(state: MenuGraphState) -> MenuGraphSta
     return state
 
 
-# Removed validate_node and adjust_menu_node - no longer needed with combination rules approach
+def validate_budget_node(state: MenuGraphState) -> MenuGraphState:
+    """Validate that generated menu is within budget."""
+    print("[STEP] validate_budget: Starting...")
+    # Check for errors from previous steps
+    if state.get("error"):
+        print("[STEP] validate_budget: Error detected in state, skipping")
+        return state
+    
+    try:
+        intent = state.get("intent", {})
+        budget = intent.get("budget", 200000)
+        menu = state.get("generated_menu", {})
+        available_ingredients = state.get("available_ingredients", [])
+        
+        # Create ingredient map for price lookup
+        ingredient_map = {ing["name"].lower(): ing for ing in available_ingredients}
+        
+        # Recalculate total price to verify
+        total_price = 0
+        for item in menu.get("items", []):
+            dish_price = 0
+            for ing in item.get("ingredients", []):
+                ing_name_lower = ing["name"].lower()
+                if ing_name_lower in ingredient_map:
+                    base_price = ingredient_map[ing_name_lower]["base_price"]
+                    ing_quantity = ing.get("quantity", 0)
+                    ingredient_cost = base_price * ing_quantity
+                    dish_price += ingredient_cost
+                else:
+                    # Use LLM provided price if ingredient not found
+                    dish_price += ing.get("price", 0)
+            total_price += dish_price
+        
+        # Allow 5% tolerance
+        budget_tolerance = budget * 1.05
+        
+        if total_price > budget_tolerance:
+            state["needs_adjustment"] = True
+            state["budget_error"] = f"Menu total ({total_price:,.0f} VND) exceeds budget ({budget:,.0f} VND) by {total_price - budget:,.0f} VND"
+            print(f"[STEP] validate_budget: FAILED - {state['budget_error']}")
+        else:
+            state["needs_adjustment"] = False
+            state["budget_error"] = None
+            print(f"[STEP] validate_budget: Success - total {total_price:,.0f} VND <= budget {budget:,.0f} VND")
+        
+        # Update menu with recalculated price
+        menu["total_price"] = total_price
+        state["generated_menu"] = menu
+        
+    except Exception as e:
+        error_msg = f"Error validating budget: {str(e)}"
+        print(f"[STEP] validate_budget: FAILED - {error_msg}")
+        state["error"] = error_msg
+    return state
+
+
+def adjust_menu_node(state: MenuGraphState) -> MenuGraphState:
+    """Adjust menu to fit within budget using LLM."""
+    print("[STEP] adjust_menu: Starting...")
+    # Check for errors from previous steps
+    if state.get("error"):
+        print("[STEP] adjust_menu: Error detected in state, skipping")
+        return state
+    
+    try:
+        intent = state.get("intent", {})
+        budget = intent.get("budget", 200000)
+        menu = state.get("generated_menu", {})
+        available_ingredients = state.get("available_ingredients", [])
+        budget_error = state.get("budget_error", "Menu exceeds budget")
+        
+        # Increment iteration counter
+        state["iteration_count"] = state.get("iteration_count", 0) + 1
+        iteration = state["iteration_count"]
+        
+        print(f"[STEP] adjust_menu: Iteration {iteration}, attempting to adjust menu within budget {budget:,.0f} VND")
+        
+        # Call LLM to adjust menu
+        llm_service = get_llm_service()
+        adjusted_menu, usage_info = llm_service.adjust_menu(
+            menu=menu,
+            validation_errors=[budget_error],
+            available_ingredients=available_ingredients,
+            budget=budget
+        )
+        
+        state["generated_menu"] = adjusted_menu
+        if "llm_usage" not in state:
+            state["llm_usage"] = []
+        state["llm_usage"].append({"operation": f"adjust_menu_iter_{iteration}", **usage_info})
+        
+        menu_items_count = len(adjusted_menu.get("items", []))
+        print(f"[STEP] adjust_menu: Success - adjusted menu has {menu_items_count} items")
+        
+    except Exception as e:
+        error_msg = f"Error adjusting menu: {str(e)}"
+        print(f"[STEP] adjust_menu: FAILED - {error_msg}")
+        state["error"] = error_msg
+    return state
 
 
 def build_response_node(state: MenuGraphState) -> MenuGraphState:
