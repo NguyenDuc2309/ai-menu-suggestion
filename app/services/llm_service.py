@@ -1,6 +1,5 @@
 """LLM service with multi-provider support (Gemini/OpenAI)."""
-import time
-from typing import List, Dict, Any, Tuple, Union
+from typing import List, Dict, Any
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
@@ -12,79 +11,6 @@ from app.prompts import PARSE_INTENT_PROMPT, GENERATE_MENU_PROMPT, ADJUST_MENU_P
 
 class LLMService:
     """Service for LLM operations with configurable provider (Gemini/OpenAI)."""
-    
-    def _extract_token_usage(self, response) -> Dict[str, Any]:
-        """Extract token usage from response (works for both Gemini and OpenAI)."""
-        token_usage = {}
-        
-        # Try OpenAI format first (response_metadata.token_usage)
-        try:
-            if hasattr(response, "response_metadata") and response.response_metadata:
-                if isinstance(response.response_metadata, dict):
-                    token_usage = response.response_metadata.get("token_usage", {})
-                elif hasattr(response.response_metadata, "get"):
-                    token_usage = response.response_metadata.get("token_usage", {})
-                else:
-                    # Try accessing as attribute
-                    token_usage = getattr(response.response_metadata, "token_usage", {})
-                
-                if token_usage:
-                    return token_usage if isinstance(token_usage, dict) else {}
-        except Exception as e:
-            pass
-        
-        # Try Gemini format (usage_metadata)
-        try:
-            if hasattr(response, "usage_metadata"):
-                usage_metadata = response.usage_metadata
-                if usage_metadata:
-                    prompt_tokens = getattr(usage_metadata, "prompt_token_count", None)
-                    completion_tokens = getattr(usage_metadata, "candidates_token_count", None)
-                    total_tokens = getattr(usage_metadata, "total_token_count", None)
-                    
-                    # Check if any token count exists
-                    if prompt_tokens is not None or completion_tokens is not None or total_tokens is not None:
-                        return {
-                            "prompt_tokens": prompt_tokens or 0,
-                            "completion_tokens": completion_tokens or 0,
-                            "total_tokens": total_tokens or (prompt_tokens or 0) + (completion_tokens or 0)
-                        }
-        except Exception as e:
-            pass
-        
-        # Try accessing response_metadata as dict directly
-        try:
-            if hasattr(response, "response_metadata"):
-                metadata = response.response_metadata
-                if isinstance(metadata, dict):
-                    token_usage = metadata.get("token_usage", {})
-                    if token_usage:
-                        return token_usage
-        except Exception as e:
-            pass
-        
-        # Try to get from additional_kwargs (some LangChain versions store it here)
-        try:
-            if hasattr(response, "additional_kwargs"):
-                kwargs = response.additional_kwargs
-                if isinstance(kwargs, dict):
-                    if "usage_metadata" in kwargs:
-                        usage_meta = kwargs["usage_metadata"]
-                        if isinstance(usage_meta, dict):
-                            prompt_tokens = usage_meta.get("prompt_token_count", 0)
-                            completion_tokens = usage_meta.get("candidates_token_count", 0)
-                            total_tokens = usage_meta.get("total_token_count", 0)
-                            if total_tokens > 0:
-                                return {
-                                    "prompt_tokens": prompt_tokens,
-                                    "completion_tokens": completion_tokens,
-                                    "total_tokens": total_tokens
-                                }
-        except Exception as e:
-            pass
-        
-        # If token usage not found, return empty dict (don't log to reduce noise)
-        return {}
     
     def __init__(self):
         """Initialize LLM based on LLM_PROVIDER config."""
@@ -98,34 +24,32 @@ class LLMService:
                 model="gemini-2.5-pro",
                 temperature=0.7,
                 google_api_key=config.GEMINI_API_KEY,
-                max_retries=0  # Disable retry to fail fast on quota errors
+                max_retries=0  
             )
-            self.use_system_message = False  # Gemini doesn't support SystemMessage
+            self.use_system_message = False 
             
         elif self.provider == "openai":
             if not config.OPENAI_API_KEY:
                 raise ValueError("Missing OPENAI_API_KEY (required when LLM_PROVIDER=openai)")
             
             self.llm = ChatOpenAI(
-                model="gpt-4-turbo-preview",  # Using gpt-4-turbo as gpt-4.1 doesn't exist
-                temperature=0.7,
+                model="gpt-4.1",  
+                temperature=0.8,  
                 openai_api_key=config.OPENAI_API_KEY,
-                max_retries=0  # Disable retry to fail fast on errors
+                max_retries=0 
             )
-            self.use_system_message = True  # OpenAI supports SystemMessage
+            self.use_system_message = True  
             
         else:
             raise ValueError(f"Invalid LLM_PROVIDER: {self.provider}. Must be 'gemini' or 'openai'")
     
-    def parse_intent(self, user_input: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        start_time = time.time()
+    def parse_intent(self, user_input: str) -> Dict[str, Any]:
         prompt = ChatPromptTemplate.from_messages([
             HumanMessage(content=PARSE_INTENT_PROMPT.format(user_input=user_input))
         ])
         
         try:
             response = self.llm.invoke(prompt.format_messages())
-            elapsed_time = time.time() - start_time
             
             import json
             import re
@@ -171,29 +95,18 @@ class LLMService:
             if not isinstance(intent, dict):
                 raise ValueError(f"Parsed JSON is not a dictionary: {type(intent)}")
             
-            # Extract token usage
-            token_usage = self._extract_token_usage(response)
-            
-            usage_info = {
-                "time_seconds": round(elapsed_time, 3),
-                "tokens": token_usage
-            }
-            
-            return intent, usage_info
+            return intent
         except json.JSONDecodeError as e:
-            elapsed_time = time.time() - start_time
             print(f"[LLM] JSONDecodeError: {e}")
             print(f"[LLM] Error at position: {e.pos if hasattr(e, 'pos') else 'N/A'}")
             print(f"[LLM] Full response content: {response.content if 'response' in locals() else 'N/A'}")
             print(f"[LLM] Extracted content that failed: {content if 'content' in locals() else 'N/A'}")
             raise ValueError(f"Failed to parse intent: Invalid JSON response from LLM. Error: {str(e)}")
         except google_exceptions.ResourceExhausted as e:
-            elapsed_time = time.time() - start_time
             print(f"[LLM] parse_intent: ResourceExhausted caught immediately - Quota exceeded!")
             print(f"[LLM] parse_intent: Error details: {e}")
             raise ValueError(f"API quota exceeded: {str(e)}")
         except Exception as e:
-            elapsed_time = time.time() - start_time
             error_str = str(e).lower()
             error_type = type(e).__name__
             print(f"[LLM] Unexpected error parsing intent ({self.provider}): {error_type}: {e}")
@@ -217,10 +130,12 @@ class LLMService:
         self,
         ingredients: List[Dict[str, Any]],
         context: List[str],
-        cuisine: str,
-        budget: float
-    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        start_time = time.time()
+        meal_type: str,
+        num_people: int,
+        budget: float,
+        previous_dishes: List[str] = None,
+        budget_specified: bool = True
+    ) -> Dict[str, Any]:
         # Format ingredients list
         # base_price is price per unit, quantity is stock
         ingredients_list = []
@@ -234,21 +149,50 @@ class LLMService:
         ingredients_text = "\n".join(ingredients_list)
         
         # Format combination rules context
-        context_text = "\n\n".join(context) if context else "No combination rules available."
+        context_text = "\n\n".join(context) if context else "Không có quy tắc kết hợp. Hãy tạo menu hợp lý dựa trên nguyên liệu có sẵn."
+        
+        # Format previous dishes context
+        if previous_dishes and len(previous_dishes) > 0:
+            dishes_list = ", ".join(previous_dishes)
+            previous_dishes_text = f"""🔔 LƯU Ý QUAN TRỌNG: TRÁNH LẶP MÓN ĂN
+Người dùng này gần đây đã được gợi ý các món: {dishes_list}
+→ Hãy gợi ý các món KHÁC, sáng tạo và đa dạng hơn. Đừng lặp lại các món trên!"""
+        else:
+            previous_dishes_text = ""
+        
+        # Format budget context
+        if not budget_specified:
+            # User did not specify budget, suggest reasonable dishes at average price per person
+            # Average meal price per person in Vietnam: ~50-80k
+            avg_per_person_low = 50000
+            avg_per_person_high = 80000
+            target_low = avg_per_person_low * num_people
+            target_high = avg_per_person_high * num_people
+            
+            budget_context = f"""⚠️  LƯU Ý: Người dùng KHÔNG yêu cầu ngân sách cụ thể.
+→ Đề xuất món ăn ở mức GIÁ TRUNG BÌNH: ~{avg_per_person_low//1000}-{avg_per_person_high//1000}k/người
+→ Target cho {num_people} người: ~{target_low:,}-{target_high:,} VND (KHÔNG cần dùng hết {budget:,.0f} VND)
+→ Chọn món phổ biến, hợp lý, không quá đắt hay sang trọng."""
+        else:
+            # User specified budget, try to use 70-85% of it
+            budget_context = f"""✓ Người dùng YÊU CẦU ngân sách {budget:,.0f} VND.
+→ Cố gắng tận dụng 70-85% ngân sách (khoảng {int(budget * 0.7):,}-{int(budget * 0.85):,} VND)."""
         
         prompt = ChatPromptTemplate.from_messages([
             HumanMessage(content=GENERATE_MENU_PROMPT.format(
-                cuisine=cuisine,
+                meal_type=meal_type,
+                num_people=num_people,
                 budget=budget,
                 ingredients_text=ingredients_text,
-                context_text=context_text
+                context_text=context_text,
+                previous_dishes_text=previous_dishes_text,
+                budget_context=budget_context
             ))
         ])
         
         try:
             print("[LLM] generate_menu: Invoking LLM...")
             response = self.llm.invoke(prompt.format_messages())
-            elapsed_time = time.time() - start_time
             
             import json
             import re
@@ -300,35 +244,23 @@ class LLMService:
             if "items" not in menu:
                 raise ValueError(f"Menu JSON missing 'items' key. Keys: {list(menu.keys())}")
             
-            # Extract token usage
-            token_usage = self._extract_token_usage(response)
-            
-            usage_info = {
-                "time_seconds": round(elapsed_time, 3),
-                "tokens": token_usage
-            }
-            
-            return menu, usage_info
+            return menu
         except json.JSONDecodeError as e:
-            elapsed_time = time.time() - start_time
             print(f"[LLM] JSONDecodeError: {e}")
             print(f"[LLM] Error at position: {e.pos if hasattr(e, 'pos') else 'N/A'}")
             print(f"[LLM] Full response content: {response.content if 'response' in locals() else 'N/A'}")
             print(f"[LLM] Extracted content that failed: {content if 'content' in locals() else 'N/A'}")
             raise ValueError(f"Failed to generate menu: Invalid JSON response from LLM. Error: {str(e)}")
         except KeyError as e:
-            elapsed_time = time.time() - start_time
             print(f"[LLM] KeyError: Missing key {e}")
             print(f"[LLM] Full response content: {response.content if 'response' in locals() else 'N/A'}")
             print(f"[LLM] Parsed menu keys: {list(menu.keys()) if 'menu' in locals() else 'N/A'}")
             raise ValueError(f"Failed to generate menu: Missing required key in response. {str(e)}")
         except google_exceptions.ResourceExhausted as e:
-            elapsed_time = time.time() - start_time
             print(f"[LLM] generate_menu: ResourceExhausted caught immediately - Quota exceeded!")
             print(f"[LLM] generate_menu: Error details: {e}")
             raise ValueError(f"API quota exceeded: {str(e)}")
         except Exception as e:
-            elapsed_time = time.time() - start_time
             error_str = str(e).lower()
             error_type = type(e).__name__
             print(f"[LLM] Unexpected error generating menu ({self.provider}): {error_type}: {e}")
@@ -354,8 +286,7 @@ class LLMService:
         validation_errors: List[str],
         available_ingredients: List[Dict[str, Any]],
         budget: float
-    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        start_time = time.time()
+    ) -> Dict[str, Any]:
         errors_text = "\n".join([f"- {err}" for err in validation_errors])
         
         # Format available ingredients
@@ -381,7 +312,6 @@ class LLMService:
         
         try:
             response = self.llm.invoke(prompt.format_messages())
-            elapsed_time = time.time() - start_time
             
             import json
             import re
@@ -429,35 +359,23 @@ class LLMService:
             if "items" not in adjusted_menu:
                 raise ValueError(f"Menu JSON missing 'items' key. Keys: {list(adjusted_menu.keys())}")
             
-            # Extract token usage
-            token_usage = self._extract_token_usage(response)
-            
-            usage_info = {
-                "time_seconds": round(elapsed_time, 3),
-                "tokens": token_usage
-            }
-            
-            return adjusted_menu, usage_info
+            return adjusted_menu
         except json.JSONDecodeError as e:
-            elapsed_time = time.time() - start_time
             print(f"[LLM] JSONDecodeError: {e}")
             print(f"[LLM] Error at position: {e.pos if hasattr(e, 'pos') else 'N/A'}")
             print(f"[LLM] Full response content: {response.content if 'response' in locals() else 'N/A'}")
             print(f"[LLM] Extracted content that failed: {content if 'content' in locals() else 'N/A'}")
             raise ValueError(f"Failed to adjust menu: Invalid JSON response from LLM. Error: {str(e)}")
         except KeyError as e:
-            elapsed_time = time.time() - start_time
             print(f"[LLM] KeyError: Missing key {e}")
             print(f"[LLM] Full response content: {response.content if 'response' in locals() else 'N/A'}")
             print(f"[LLM] Parsed menu keys: {list(adjusted_menu.keys()) if 'adjusted_menu' in locals() else 'N/A'}")
             raise ValueError(f"Failed to adjust menu: Missing required key in response. {str(e)}")
         except google_exceptions.ResourceExhausted as e:
-            elapsed_time = time.time() - start_time
             print(f"[LLM] adjust_menu: ResourceExhausted caught immediately - Quota exceeded!")
             print(f"[LLM] adjust_menu: Error details: {e}")
             raise ValueError(f"API quota exceeded: {str(e)}")
         except Exception as e:
-            elapsed_time = time.time() - start_time
             error_str = str(e).lower()
             error_type = type(e).__name__
             print(f"[LLM] Unexpected error adjusting menu ({self.provider}): {error_type}: {e}")

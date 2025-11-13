@@ -1,6 +1,7 @@
 """LangGraph nodes implementation."""
 import json
 import os
+import random
 from typing import Dict, Any
 from app.graph.state import MenuGraphState
 from app.services.llm_service import get_llm_service
@@ -12,13 +13,10 @@ def parse_intent_node(state: MenuGraphState) -> MenuGraphState:
     print("[STEP] parse_intent: Starting...")
     try:
         llm_service = get_llm_service()
-        intent, usage_info = llm_service.parse_intent(state["user_input"])
+        intent = llm_service.parse_intent(state["user_input"])
         state["intent"] = intent
         state["iteration_count"] = 0
-        if "llm_usage" not in state:
-            state["llm_usage"] = []
-        state["llm_usage"].append({"operation": "parse_intent", **usage_info})
-        print(f"[STEP] parse_intent: Success - cuisine={intent.get('cuisine')}, budget={intent.get('budget')}")
+        print(f"[STEP] parse_intent: Success - meal_type={intent.get('meal_type')}, budget={intent.get('budget')}")
     except Exception as e:
         error_msg = f"Error parsing intent: {str(e)}"
         print(f"[STEP] parse_intent: FAILED - {error_msg}")
@@ -36,8 +34,9 @@ def parse_intent_node(state: MenuGraphState) -> MenuGraphState:
         # For non-critical errors, set error in state
         state["error"] = error_msg
         state["intent"] = {
-            "cuisine": "Việt",
             "budget": 200000,
+            "meal_type": "trưa",
+            "num_people": 1,
             "preferences": []
         }
         state["iteration_count"] = 0
@@ -85,7 +84,7 @@ def query_ingredients_node(state: MenuGraphState) -> MenuGraphState:
 
 
 def prefilter_ingredients_by_budget_node(state: MenuGraphState) -> MenuGraphState:
-    """Filter ingredients based on budget to reduce LLM context size."""
+    """Filter ingredients: Remove condiments and filter based on budget."""
     print("[STEP] prefilter_ingredients: Starting...")
     # Check for errors from previous steps
     if state.get("error"):
@@ -97,8 +96,25 @@ def prefilter_ingredients_by_budget_node(state: MenuGraphState) -> MenuGraphStat
         budget = intent.get("budget", 200000)
         all_ingredients = state.get("available_ingredients", [])
         
-        # Sort ingredients by base_price (cheapest first)
-        sorted_ingredients = sorted(all_ingredients, key=lambda x: x.get("base_price", 0))
+        # CRITICAL: Remove condiments/spices (people already have them at home)
+        EXCLUDED_CONDIMENTS = {
+            "muối", "đường", "dầu ăn", "xì dầu", "nước mắm", "tỏi", "ớt", 
+            "hạt nêm", "bột ngọt", "tiêu", "mắm tôm", "giấm", "mật ong",
+            "tương ớt", "tương đen", "dầu hào", "nước tương", "mè", "vừng",
+            "bột canh", "hành tím", "gừng", "sả", "lá chanh", "rau mùi tàu",
+            "hành lá", "ngò", "rau mùi", "ngò gai"  # herbs people usually have
+        }
+        
+        # Filter out condiments first
+        non_condiment_ingredients = [
+            ing for ing in all_ingredients 
+            if ing["name"].lower() not in EXCLUDED_CONDIMENTS
+        ]
+        
+        print(f"[STEP] prefilter_ingredients: Removed condiments - from {len(all_ingredients)} to {len(non_condiment_ingredients)} ingredients")
+        
+        # Sort by base_price (cheapest first)
+        sorted_ingredients = sorted(non_condiment_ingredients, key=lambda x: x.get("base_price", 0))
         
         # Budget-based filtering strategy
         if budget < 150000:
@@ -114,20 +130,17 @@ def prefilter_ingredients_by_budget_node(state: MenuGraphState) -> MenuGraphStat
             max_base_price = float('inf')
             print(f"[STEP] prefilter_ingredients: Large budget ({budget} VND), using all ingredients")
         
-        # Filter ingredients
+        # Filter by budget
         filtered = []
         
-        # Always include essential ingredients (gia vị, tinh bột)
-        essentials = [ing for ing in sorted_ingredients if ing.get("category") in ["gia vị", "tinh bột"]]
-        filtered.extend(essentials[:15])  # Limit essentials to 15
+        # Prioritize main ingredients (proteins, vegetables, starches)
+        # But exclude "gia vị" category since we already filtered condiments
+        for ing in sorted_ingredients:
+            if ing.get("base_price", 0) <= max_base_price:
+                filtered.append(ing)
         
-        # Add affordable proteins and vegetables
-        non_essentials = [ing for ing in sorted_ingredients 
-                         if ing.get("category") not in ["gia vị", "tinh bột"] 
-                         and ing.get("base_price", 0) <= max_base_price]
-        
-        # Limit to 35 non-essential ingredients
-        filtered.extend(non_essentials[:35])
+        # Limit to top 50 ingredients to reduce context size
+        filtered = filtered[:50]
         
         # Remove duplicates while preserving order
         seen = set()
@@ -137,8 +150,12 @@ def prefilter_ingredients_by_budget_node(state: MenuGraphState) -> MenuGraphStat
                 seen.add(ing["name"])
                 unique_filtered.append(ing)
         
+        # CRITICAL: Shuffle ingredients to prevent LLM token bias
+        # This ensures different dishes are suggested each time
+        random.shuffle(unique_filtered)
+        
         state["available_ingredients"] = unique_filtered
-        print(f"[STEP] prefilter_ingredients: Success - filtered from {len(all_ingredients)} to {len(unique_filtered)} ingredients")
+        print(f"[STEP] prefilter_ingredients: Success - final list has {len(unique_filtered)} main ingredients (condiments excluded, shuffled for diversity)")
         
     except Exception as e:
         error_msg = f"Error prefiltering ingredients: {str(e)}"
@@ -157,16 +174,17 @@ def retrieve_rules_and_generate_menu_node(state: MenuGraphState) -> MenuGraphSta
     
     try:
         intent = state.get("intent", {})
-        cuisine = intent.get("cuisine", "Việt")
         budget = intent.get("budget", 200000)
+        meal_type = intent.get("meal_type", "trưa")
+        num_people = intent.get("num_people", 1)
         
         ingredients = state.get("available_ingredients", [])
         ingredient_names = [ing["name"] for ing in ingredients]
         
-        print(f"[STEP] retrieve_rules_and_generate_menu: Querying Pinecone for {cuisine} cuisine combination rules...")
+        print(f"[STEP] retrieve_rules_and_generate_menu: Querying Pinecone for combination rules (meal_type: {meal_type})...")
         vector_store = get_vector_store_service()
         combination_rules = vector_store.query_combination_rules(
-            cuisine_type=cuisine,
+            meal_type=meal_type,
             ingredients=ingredient_names,
             top_k=5
         )
@@ -175,16 +193,26 @@ def retrieve_rules_and_generate_menu_node(state: MenuGraphState) -> MenuGraphSta
         
         print(f"[STEP] retrieve_rules_and_generate_menu: Generating menu with LLM using combination rules...")
         llm_service = get_llm_service()
-        menu, usage_info = llm_service.generate_menu(
+        
+        # Get previous dishes for diversity
+        previous_dishes = state.get("previous_dishes", [])
+        if previous_dishes:
+            print(f"[STEP] retrieve_rules_and_generate_menu: User has {len(previous_dishes)} previous dishes, will avoid repeating them")
+        
+        # Check if budget was specified by user
+        budget_specified = intent.get("budget_specified", True)
+        print(f"[STEP] retrieve_rules_and_generate_menu: Budget specified by user: {budget_specified}")
+        
+        menu = llm_service.generate_menu(
             ingredients=ingredients,
             context=combination_rules,
-            cuisine=cuisine,
-            budget=budget
+            meal_type=meal_type,
+            num_people=num_people,
+            budget=budget,
+            previous_dishes=previous_dishes,
+            budget_specified=budget_specified
         )
         state["generated_menu"] = menu
-        if "llm_usage" not in state:
-            state["llm_usage"] = []
-        state["llm_usage"].append({"operation": "generate_menu", **usage_info})
         
         menu_items_count = len(menu.get("items", []))
         print(f"[STEP] retrieve_rules_and_generate_menu: Success - generated {menu_items_count} menu items")
@@ -292,7 +320,7 @@ def adjust_menu_node(state: MenuGraphState) -> MenuGraphState:
         
         # Call LLM to adjust menu
         llm_service = get_llm_service()
-        adjusted_menu, usage_info = llm_service.adjust_menu(
+        adjusted_menu = llm_service.adjust_menu(
             menu=menu,
             validation_errors=[budget_error],
             available_ingredients=available_ingredients,
@@ -300,9 +328,6 @@ def adjust_menu_node(state: MenuGraphState) -> MenuGraphState:
         )
         
         state["generated_menu"] = adjusted_menu
-        if "llm_usage" not in state:
-            state["llm_usage"] = []
-        state["llm_usage"].append({"operation": f"adjust_menu_iter_{iteration}", **usage_info})
         
         menu_items_count = len(adjusted_menu.get("items", []))
         print(f"[STEP] adjust_menu: Success - adjusted menu has {menu_items_count} items")
@@ -320,12 +345,14 @@ def build_response_node(state: MenuGraphState) -> MenuGraphState:
     try:
         menu = state.get("generated_menu", {})
         intent = state.get("intent", {})
-        cuisine = intent.get("cuisine", "Việt")
+        budget = intent.get("budget", 200000)
+        meal_type = intent.get("meal_type", "trưa")
         
         response = {
             "menu_items": menu.get("items", []),
             "total_price": menu.get("total_price", 0),
-            "cuisine_type": cuisine
+            "budget": budget,
+            "meal_type": meal_type
         }
         
         state["final_response"] = response
@@ -338,7 +365,8 @@ def build_response_node(state: MenuGraphState) -> MenuGraphState:
         state["final_response"] = {
             "menu_items": [],
             "total_price": 0,
-            "cuisine_type": ""
+            "budget": 0,
+            "meal_type": ""
         }
     return state
 

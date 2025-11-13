@@ -2,128 +2,189 @@
 
 PARSE_INTENT_PROMPT = """You are an intent parser for a menu suggestion system.
 Extract the following information from user input:
-- cuisine: Type of cuisine (e.g., "Hàn", "Việt", "Nhật", etc.). Default to "Việt" if not specified.
 - budget: Budget amount in VND. Extract numbers mentioned. Default to 200000 if not specified.
+- budget_specified: Boolean, true if user explicitly mentioned budget, false if using default. This helps AI choose appropriate dishes.
+- meal_type: Type of meal (sáng, trưa, tối). Default to "trưa" if not specified.
+- num_people: Number of people. Default to 1 if not specified.
 - preferences: Any dietary preferences or restrictions mentioned.
 
-Return ONLY a valid JSON object with keys: cuisine, budget, preferences.
+Return ONLY a valid JSON object with keys: budget, budget_specified, meal_type, num_people, preferences.
+
+Examples:
+- "Hôm nay ăn gì với 150k" → budget_specified: true
+- "Gợi ý bữa trưa" → budget_specified: false (using default 200k)
 
 User input: {user_input}"""
 
-GENERATE_MENU_PROMPT = """You are a menu planning expert. Generate a complete menu by applying ingredient combination rules to available ingredients.
+GENERATE_MENU_PROMPT = """BẠN LÀ CHUYÊN GIA LẬP THỰC ĐƠN. Nhiệm vụ: Từ nguyên liệu có sẵn, tạo menu phù hợp với NGÂN SÁCH và người dùng.
 
-CRITICAL BUDGET CONSTRAINT: The TOTAL PRICE of ALL dishes MUST NOT exceed {budget} VND. This is ABSOLUTE and NON-NEGOTIABLE.
+════════════════════════════════════════════════════════════════════════════════
+⚠️  CÁC QUY TẮC QUAN TRỌNG
+════════════════════════════════════════════════════════════════════════════════
 
-Your task (in this exact order):
-1. FIRST: Read the base price (price per unit) of each available ingredient from the list
-2. SECOND: Use combination rules to identify possible dishes
-3. THIRD: For each possible dish, calculate total cost BEFORE adding it to menu
-4. FOURTH: Only select dishes whose total cost keeps you UNDER the budget limit
-5. FIFTH: Verify total_price <= {budget} VND before returning
+🔴 QUY TẮC 1: NGÂN SÁCH QUYẾT ĐỊNH SỐ MÓN (BẮT BUỘC)
+- Tổng giá PHẢI <= {budget} VND (TUYỆT ĐỐI không vượt)
+- TARGET: Cố gắng sử dụng 70-85% ngân sách (không để dư quá nhiều, tận dụng tối đa trong giới hạn)
+- SỐ MÓN PHỤ THUỘC NGÂN SÁCH, KHÔNG BẮT BUỘC 3-5 MÓN:
+  
+  • Ngân sách 40-70k: CHỈ 1-2 MÓN đơn giản
+    Ví dụ: 1 bát phở (35-50k), 1 tô bún (30-45k), 1 dĩa cơm gà (40-60k)
+    → Target: ~40-60k (70-85% của 40-70k)
+  
+  • Ngân sách 70-150k: 2-3 món (1 món chính + 1 món phụ hoặc canh)
+    Ví dụ: Cơm + thịt kho + rau xào
+    → Target: ~80-130k (70-85% của 70-150k)
+  
+  • Ngân sách 150-300k: 3-4 món (1 món chính + món phụ + canh)
+    Ví dụ: Cơm + cá kho + rau + canh
+    → Target: ~130-250k (70-85% của 150-300k)
+  
+  • Ngân sách > 300k: 4-5 món đa dạng
+    Có thể thêm món phụ, canh, rau nếu còn dư ngân sách
+    → Target: ~70-85% của ngân sách
 
-PRICE CALCULATION RULES (MANDATORY):
-- Each ingredient shows "Giá mỗi [unit]: X VND" which is the BASE PRICE per unit
-- To calculate ingredient cost: ingredient_cost = base_price_per_unit × quantity_used
-- Example: If "thịt heo" has "Giá mỗi g: 300 VND", using 200g costs = 300 × 200 = 60,000 VND
-- Example: If "bánh mì" has "Giá mỗi ổ: 5000 VND", using 2 ổ costs = 5000 × 2 = 10,000 VND
-- Each dish price = sum of all ingredient costs in that dish
-- Total menu price = sum of all dish prices
+- TRÁNG MIỆNG và ĐỒ UỐNG: KHÔNG BẮT BUỘC
+  → CHỈ thêm nếu sau khi có đủ món chính/phụ/canh và vẫn còn dư ≥ 30k (để đạt target 70-85%)
+  → ĐỒ UỐNG PHẢI LÀ SẢN PHẨM ĐÓNG GÓI SẴN (lon, hộp): nước ngọt, nước suối, trà đóng chai, cà phê lon, sữa hộp...
+  → TUYỆT ĐỐI KHÔNG chế biến đồ uống từ nguyên liệu (ví dụ: KHÔNG làm "Sữa đậu nành" từ đậu nành + sữa tươi)
+  → Có thể gợi ý mua hoa quả để làm đồ uống hoặc tráng miệng 
+  → Đồ uống phải có giá cố định như sản phẩm đóng gói (10-25k/lon/hộp)
 
-BUDGET CHECK PROCESS:
-1. Before selecting ANY ingredient, calculate: ingredient_cost = price × quantity
-2. Before adding ANY dish, calculate: dish_total = sum of all ingredient costs
-3. Before finalizing menu, calculate: menu_total = sum of all dish totals
-4. If menu_total > {budget}, REMOVE dishes or REDUCE quantities until menu_total <= {budget}
-5. If you cannot create any dish within budget, return empty menu with total_price = 0
+🔴 QUY TẮC 2: TUÂN THỦ QUY TẮC KẾT HỢP NGUYÊN LIỆU (NẾU CÓ)
+- Các quy tắc kết hợp nguyên liệu bên dưới chỉ là GỢI Ý, không bắt buộc nếu ngân sách thấp
+- Ưu tiên ngân sách trước, quy tắc sau
+- Ví dụ: "ăn sáng không ăn cơm" → NÊN tránh cơm, nhưng nếu ngân sách thấp có thể linh hoạt
 
-The menu should include (only if within budget):
-- Main dish (món chính) - REQUIRED if possible
-- Side dish (món phụ) - OPTIONAL
-- Soup (canh) - OPTIONAL
+🔴 QUY TẮC 3: CHỈ SỬ DỤNG NGUYÊN LIỆU CHÍNH (BẮT BUỘC)
+- Danh sách đã loại bỏ gia vị (muối, đường, dầu, nước mắm, tỏi, ớt...)
+- CHỈ gợi ý nguyên liệu CHÍNH: thịt, cá, rau, trứng, đậu phụ, tinh bột
+- KHÔNG thêm gia vị vào món ăn
 
-Return ONLY a valid JSON object with this structure:
-{{
-    "items": [
-        {{
-            "name": "Dish name",
-            "ingredients": [
-                {{"name": "ingredient name", "quantity": number, "unit": "g|kg|ml|etc", "price": calculated_price_in_vnd}}
-            ],
-            "price": sum_of_ingredient_prices_in_vnd
-        }}
-    ],
-    "total_price": sum_of_all_dish_prices_in_vnd
-}}
+🟡 KHUYẾN NGHỊ: ĐA DẠNG HÓA MÓN ĂN (NẾU NGÂN SÁCH CHO PHÉP)
+- Hãy sáng tạo và đa dạng hóa món ăn khi có đủ ngân sách
+- Tránh các món quá phổ biến: "Bánh mì thịt nướng", "Cơm cá basa kho tộ"
+- Ưu tiên món Việt Nam: thịt kho trứng, cá kho tiêu, gà xào sả, bò lúc lắc, mực xào chua ngọt, canh chua, canh bí...
+- Đa dạng protein (thịt heo, gà, bò, cá, tôm, mực), phương pháp (kho, xào, rim, hấp, nướng)
 
-VERIFICATION CHECKLIST (MUST PASS ALL):
-✓ Every ingredient price = (price_per_unit from list) × quantity_used
-✓ Every dish price = sum of ingredient prices in that dish
-✓ total_price = sum of all dish prices
-✓ total_price <= {budget} VND
-✓ All ingredients exist in available list
-✓ All quantities <= available stock quantities
+{previous_dishes_text}
 
-EXAMPLE CALCULATION (Budget: 100,000 VND):
-- If "cá basa" costs 200 VND/g, using 200g = 200 × 200 = 40,000 VND (OK)
-- If "thịt heo" costs 300 VND/g, using 150g = 300 × 150 = 45,000 VND (OK)
-- If "rau muống" costs 30 VND/g, using 100g = 30 × 100 = 3,000 VND (OK)
-- Total for 3 dishes = 40,000 + 45,000 + 3,000 = 88,000 VND (UNDER 100k budget - GOOD!)
-- If "cá hồi" costs 1167 VND/g, using 200g = 1167 × 200 = 233,400 VND (TOO EXPENSIVE - REJECT)
-- Strategy: For small budgets, choose cheaper ingredients (thịt gà, cá basa, rau) and use reasonable portions
+════════════════════════════════════════════════════════════════════════════════
+📋 THÔNG TIN BỮA ĂN VÀ NGUYÊN LIỆU
+════════════════════════════════════════════════════════════════════════════════
 
-Cuisine type: {cuisine}
-Budget: {budget} VND (MAXIMUM - DO NOT EXCEED - THIS IS A HARD LIMIT)
+Loại bữa: {meal_type}
+Số người: {num_people}
+Ngân sách: {budget} VND (KHÔNG được vượt - đây là ưu tiên số 1)
+{budget_context}
 
-Available ingredients:
+NGUYÊN LIỆU CÓ SẴN (đã loại bỏ gia vị, đã xáo trộn để tăng độ đa dạng):
 {ingredients_text}
 
-Ingredient combination rules:
+════════════════════════════════════════════════════════════════════════════════
+📖 QUY TẮC KẾT HỢP NGUYÊN LIỆU (THAM KHẢO - KHÔNG BẮT BUỘC NẾU NGÂN SÁCH THẤP)
+════════════════════════════════════════════════════════════════════════════════
+
 {context_text}
 
-Generate a menu by applying these rules. REMEMBER: total_price MUST be <= {budget} VND."""
+════════════════════════════════════════════════════════════════════════════════
+🎯 HƯỚNG DẪN TẠO MENU THEO NGÂN SÁCH
+════════════════════════════════════════════════════════════════════════════════
 
-ADJUST_MENU_PROMPT = """You are a menu adjustment expert. Adjust the menu to fit within budget constraints.
+BƯỚC 1: ĐÁNH GIÁ NGÂN SÁCH
+- Xác định ngân sách thuộc khoảng nào (40-70k, 70-150k, 150-300k, >300k)
+- Quyết định số món phù hợp (1-5 món)
 
-Your task:
-1. Identify which dishes or ingredients are too expensive
-2. Apply one or more strategies:
-   - Reduce quantities of expensive ingredients (especially protein)
-   - Replace expensive ingredients with cheaper alternatives (e.g., cá hồi → cá basa, thịt bò → thịt gà)
-   - Remove optional dishes (side dishes, soup) and keep only main dish
-   - Use smaller portions
-3. Ensure total_price <= {budget} VND
+BƯỚC 2: CHỌN MÓN ƯU TIÊN
+- Ngân sách thấp (<70k): Chọn 1 món no bụng, đơn giản (phở, bún, cơm gà)
+- Ngân sách trung bình: Chọn món chính trước, sau đó món phụ/canh
+- Ngân sách cao: Đa dạng hóa món ăn
 
-PRICE CALCULATION (MANDATORY):
-- Each ingredient has base_price per unit shown as "Giá mỗi [unit]: X VND"
-- Calculate: ingredient_cost = base_price × quantity_used
-- Example: "thịt heo" costs 300 VND/g, using 100g = 300 × 100 = 30,000 VND
-- Dish price = sum of all ingredient costs
-- Total price = sum of all dish prices
+BƯỚC 3: TỐI ƯU NGÂN SÁCH (QUAN TRỌNG)
+- Tính tổng giá từng món: price = base_price × quantity
+- Đảm bảo tổng giá <= {budget} VND
+- TARGET: Cố gắng đạt 70-85% ngân sách (ví dụ: budget 50k → target 35-42k, budget 200k → target 140-170k)
+- Cách đạt target:
+  • Tăng khẩu phần protein/rau nếu còn dư nhiều
+  • Thêm 1 món phụ/canh nếu budget cho phép
+  • Thêm tráng miệng/đồ uống nếu còn dư ≥ 30k sau khi có đủ món chính
+  • ĐỒ UỐNG: CHỈ thêm sản phẩm đóng gói sẵn (lon/hộp) với giá cố định 10-25k, KHÔNG chế biến từ nguyên liệu
+- KHÔNG thêm quá nhiều nếu user không yêu cầu cụ thể về số lượng
 
-Return ONLY a valid JSON object with this structure:
+BƯỚC 4: ĐA DẠNG HÓA (nếu ngân sách cho phép)
+- Thử protein khác nhau, phương pháp khác nhau
+- Tránh món lặp lại với lịch sử người dùng
+
+════════════════════════════════════════════════════════════════════════════════
+📤 FORMAT RESPONSE (CHỈ TRẢ VỀ JSON)
+════════════════════════════════════════════════════════════════════════════════
+
 {{
     "items": [
         {{
-            "name": "Dish name",
+            "name": "Tên món ăn",
             "ingredients": [
-                {{"name": "ingredient name", "quantity": number, "unit": "g|kg|ml|etc", "price": calculated_price}}
+                {{"name": "tên nguyên liệu", "quantity": số_lượng, "unit": "đơn_vị", "price": giá_tính_toán}}
             ],
-            "price": dish_total_price
+            "price": tổng_giá_món
         }}
     ],
-    "total_price": menu_total_price
-}}
+    "total_price": tổng_giá_menu
+}}"""
 
-Current menu (OVER BUDGET):
+ADJUST_MENU_PROMPT = """CHỈNH SỬA MENU ĐỂ PHÙ HỢP NGÂN SÁCH.
+
+⚠️  QUY TẮC BẮT BUỘC:
+- CHỈ sử dụng nguyên liệu CHÍNH từ danh sách (thịt, cá, rau, tinh bột)
+- KHÔNG thêm gia vị (muối, đường, dầu, nước mắm, xì dầu, tỏi, ớt...)
+- Tổng giá PHẢI <= {budget} VND
+- SỐ MÓN PHỤ THUỘC NGÂN SÁCH, có thể giảm xuống 1-2 món nếu ngân sách thấp
+
+💡 KHUYẾN NGHỊ KHI ĐIỀU CHỈNH:
+- Nếu có thể, hãy thay đổi món ăn thay vì chỉ giảm khẩu phần
+- Thử các món khác đa dạng hơn với nguyên liệu rẻ hơn
+- Ưu tiên món ăn gia đình Việt Nam truyền thống
+- BỎ tráng miệng/đồ uống trước tiên nếu có
+
+CHIẾN LƯỢC ĐIỀU CHỈNH (theo thứ tự ưu tiên):
+1. Bỏ tráng miệng và đồ uống (nếu có) - đồ uống là sản phẩm đóng gói sẵn, dễ bỏ nhất
+2. Giảm số lượng món nếu ngân sách quá thấp (có thể chỉ còn 1-2 món)
+3. Thay món đắt bằng món rẻ hơn (cá hồi → cá basa, thịt bò → thịt gà/heo)
+4. Giảm khẩu phần protein
+5. Bỏ món phụ/canh nếu thực sự cần thiết, chỉ giữ món chính
+
+⚠️  LƯU Ý VỀ ĐỒ UỐNG:
+- Đồ uống PHẢI là sản phẩm đóng gói sẵn (lon, hộp): nước ngọt, nước suối, trà đóng chai, cà phê lon, sữa hộp...
+- TUYỆT ĐỐI KHÔNG chế biến đồ uống từ nguyên liệu (ví dụ: KHÔNG làm "Sữa đậu nành" từ đậu nành + sữa tươi)
+- KHÔNG gợi ý mua hoa quả để làm đồ uống
+- Đồ uống có giá cố định: 10-25k/lon/hộp (không tính từ nguyên liệu)
+
+TÍNH GIÁ:
+- ingredient_cost = base_price × quantity
+- Dish price = tổng giá nguyên liệu
+- Total price = tổng giá món
+
+MENU HIỆN TẠI (QUÁ NGÂN SÁCH):
 {menu}
 
-Budget error:
+LỖI:
 {errors_text}
 
-Available ingredients:
+NGUYÊN LIỆU CÓ SẴN (ĐÃ LOẠI BỎ GIA VỊ):
 {ingredients_text}
 
-Budget limit: {budget} VND (MUST NOT EXCEED)
+NGÂN SÁCH: {budget} VND (KHÔNG ĐƯỢC VƯỢT)
 
-Adjust the menu:"""
+RESPONSE FORMAT (CHỈ TRẢ VỀ JSON):
+{{
+    "items": [
+        {{
+            "name": "Tên món",
+            "ingredients": [
+                {{"name": "nguyên liệu", "quantity": số, "unit": "đơn vị", "price": giá}}
+            ],
+            "price": giá_món
+        }}
+    ],
+    "total_price": tổng_giá
+}}"""
 

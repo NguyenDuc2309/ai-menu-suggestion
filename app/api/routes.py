@@ -8,6 +8,7 @@ from app.models.request import MenuRequest
 from app.models.response import MenuResponse, MenuData, MenuDish, IngredientItem
 from app.graph.graph import menu_graph
 from app.graph.state import MenuGraphState
+from app.services.user_history import get_user_history_service
 
 router = APIRouter(prefix="/api/v1", tags=["menu"])
 
@@ -46,9 +47,27 @@ async def suggest_menu(request: Request, menu_request: MenuRequest) -> MenuRespo
     
     print(f"\n[REQUEST] Starting menu suggestion for query: '{menu_request.query}'")
     request_start_time = time.time()
+    
+    # Get user history service
+    history_service = get_user_history_service()
+    
+    # Get previous dishes for this user
+    user_id = menu_request.user_id
+    previous_dishes = []
+    if user_id:
+        previous_dishes = history_service.get_recent_dishes(user_id, limit=10)
+        if previous_dishes:
+            print(f"[REQUEST] User {user_id} has {len(previous_dishes)} previous dishes: {previous_dishes[:3]}...")
+        else:
+            print(f"[REQUEST] User {user_id} has no previous history")
+    else:
+        print("[REQUEST] No user_id provided, no history tracking")
+    
     try:
         initial_state: MenuGraphState = {
             "user_input": menu_request.query,
+            "user_id": user_id,
+            "previous_dishes": previous_dishes,
             "intent": {},
             "available_ingredients": [],
             "combination_rules": [],
@@ -57,8 +76,7 @@ async def suggest_menu(request: Request, menu_request: MenuRequest) -> MenuRespo
             "error": None,
             "iteration_count": 0,
             "needs_adjustment": None,
-            "budget_error": None,
-            "llm_usage": []
+            "budget_error": None
         }
         
         print("[REQUEST] Invoking menu graph workflow...")
@@ -123,16 +141,8 @@ async def suggest_menu(request: Request, menu_request: MenuRequest) -> MenuRespo
         if not menu_items_list:
             raise HTTPException(status_code=500, detail="Failed to generate menu items")
         
-        # Calculate total tokens from llm_usage
-        llm_usage = final_state.get("llm_usage", [])
-        total_tokens = 0
-        for usage in llm_usage:
-            tokens = usage.get("tokens", {})
-            total_tokens += tokens.get("total_tokens", 0)
-        
         metadata = {
-            "process_time": round(total_time, 3),
-            "token_usage": total_tokens
+            "process_time": round(total_time, 3)
         }
         
         # Format menu dishes and recalculate prices from available ingredients
@@ -181,7 +191,7 @@ async def suggest_menu(request: Request, menu_request: MenuRequest) -> MenuRespo
         
         # Get intent info
         intent = final_state.get("intent", {})
-        cuisine = final_response.get("cuisine_type", intent.get("cuisine", "Việt"))
+        meal_type = final_response.get("meal_type", intent.get("meal_type", "trưa"))
         total_budget = intent.get("budget", 200000)
         # Recalculate total price from recalculated dish prices
         total_estimated_price = sum(dish.total_price for dish in menu_dishes)
@@ -199,16 +209,31 @@ async def suggest_menu(request: Request, menu_request: MenuRequest) -> MenuRespo
         
         # Generate message
         num_dishes = len(menu_dishes)
-        cuisine_name = cuisine
+        meal_type_display = {"sáng": "bữa sáng", "trưa": "bữa trưa", "tối": "bữa tối"}.get(meal_type, meal_type)
         budget_formatted = f"{total_budget:,.0f}".replace(",", ".")
-        message = f"Hôm nay tôi gợi ý cho bạn {num_dishes} món {cuisine_name} hấp dẫn, ngon miệng và phù hợp với ngân sách {budget_formatted} VND. Mỗi món đều liệt kê nguyên liệu và giá, giúp bạn dễ dàng chuẩn bị."
+        
+        # Create contextual message based on budget and number of dishes
+        if total_budget < 70000:
+            context = "Với ngân sách này, "
+        elif num_dishes <= 2:
+            context = "Với ngân sách hạn chế, "
+        else:
+            context = ""
+        
+        message = f"{context}Tôi gợi ý cho bạn {num_dishes} món cho {meal_type_display}, tổng chi phí khoảng {f'{total_estimated_price:,.0f}'.replace(',', '.')} VND (ngân sách {budget_formatted} VND)."
         
         menu_data = MenuData(
-            cuisine=cuisine,
+            meal_type=meal_type,
             total_budget=total_budget,
             total_estimated_price=total_estimated_price,
             menu=menu_dishes
         )
+        
+        # Save dishes to user history if user_id is provided
+        if user_id:
+            dish_names = [dish.name for dish in menu_dishes]
+            history_service.add_dishes(user_id, dish_names)
+            print(f"[REQUEST] Saved {len(dish_names)} dishes to history for user {user_id}")
         
         return MenuResponse(
             statusCode=200,

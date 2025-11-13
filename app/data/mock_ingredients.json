@@ -364,41 +364,6 @@
     "category": "đóng hộp"
   },
   {
-    "name": "nước mắm",
-    "base_price": 80,
-    "quantity": 500,
-    "unit": "ml",
-    "category": "gia vị"
-  },
-  {
-    "name": "dầu ăn",
-    "base_price": 70,
-    "quantity": 500,
-    "unit": "ml",
-    "category": "gia vị"
-  },
-  {
-    "name": "muối",
-    "base_price": 20,
-    "quantity": 500,
-    "unit": "g",
-    "category": "gia vị"
-  },
-  {
-    "name": "đường",
-    "base_price": 40,
-    "quantity": 500,
-    "unit": "g",
-    "category": "gia vị"
-  },
-  {
-    "name": "hạt nêm",
-    "base_price": 150,
-    "quantity": 200,
-    "unit": "g",
-    "category": "gia vị"
-  },
-  {
     "name": "kimchi",
     "base_price": 160,
     "quantity": 500,
@@ -438,20 +403,6 @@
     "base_price": 3000,
     "quantity": 10,
     "unit": "gói",
-    "category": "tinh bột"
-  },
-  {
-    "name": "bún",
-    "base_price": 40,
-    "quantity": 500,
-    "unit": "g",
-    "category": "tinh bột"
-  },
-  {
-    "name": "phở",
-    "base_price": 50,
-    "quantity": 500,
-    "unit": "g",
     "category": "tinh bột"
   },
   {

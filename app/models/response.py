@@ -17,7 +17,7 @@ class MenuDish(BaseModel):
 
 
 class MenuData(BaseModel):
-    cuisine: str
+    meal_type: str
     total_budget: float
     total_estimated_price: float
     menu: List[MenuDish]

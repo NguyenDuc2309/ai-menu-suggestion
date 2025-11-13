@@ -8,6 +8,12 @@ class MenuGraphState(TypedDict):
     # User input
     user_input: str
     
+    # User ID for tracking history (optional)
+    user_id: Optional[str]
+    
+    # Previous dishes suggested to this user
+    previous_dishes: List[str]
+    
     # Parsed intent
     intent: Dict[str, Any]  # {cuisine, budget, preferences}
     
@@ -32,7 +38,4 @@ class MenuGraphState(TypedDict):
     # Budget validation
     needs_adjustment: Optional[bool]
     budget_error: Optional[str]
-    
-    # LLM usage tracking
-    llm_usage: Optional[List[Dict[str, Any]]]
 

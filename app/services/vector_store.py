@@ -34,7 +34,7 @@ class VectorStoreService:
     
     def query_combination_rules(
         self,
-        cuisine_type: str,
+        meal_type: str,
         ingredients: List[str],
         top_k: int = 5
     ) -> List[str]:
@@ -42,18 +42,18 @@ class VectorStoreService:
         Query Pinecone to retrieve ingredient combination rules.
         
         Args:
-            cuisine_type: Type of cuisine (e.g., "Hàn", "Việt")
+            meal_type: Type of meal (e.g., "sáng", "trưa", "tối")
             ingredients: List of available ingredients
             top_k: Number of rule documents to retrieve
             
         Returns:
             List of combination rule documents as strings
         """
-        # Build query text focusing on ingredient combination rules
-        query_text = f"{cuisine_type} cuisine ingredient combination rules"
+        # Build query text focusing on ingredient combination rules for meal type
+        query_text = f"Quy tắc kết hợp nguyên liệu món ăn Việt Nam bữa {meal_type}"
         if ingredients:
             ingredients_text = ", ".join(ingredients[:5])  # Limit to first 5 ingredients
-            query_text += f" with ingredients: {ingredients_text}"
+            query_text += f" với nguyên liệu: {ingredients_text}"
         
         try:
             # Query the vector store for combination rules
@@ -73,7 +73,7 @@ class VectorStoreService:
     
     def query_knowledge(
         self,
-        cuisine_type: str,
+        meal_type: str,
         ingredients: List[str],
         top_k: int = 5
     ) -> List[str]:
@@ -81,7 +81,7 @@ class VectorStoreService:
         Deprecated: Use query_combination_rules instead.
         Kept for backward compatibility.
         """
-        return self.query_combination_rules(cuisine_type, ingredients, top_k)
+        return self.query_combination_rules(meal_type, ingredients, top_k)
 
 
 # Singleton instance
