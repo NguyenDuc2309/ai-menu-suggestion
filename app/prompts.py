@@ -1,18 +1,28 @@
 """Prompts for LLM operations."""
 
-PARSE_INTENT_PROMPT = """You are an intent parser for a menu suggestion system.
-Extract the following information from user input:
-- budget: Budget amount in VND. Extract numbers mentioned. Default to 200000 if not specified.
-- budget_specified: Boolean, true if user explicitly mentioned budget, false if using default. This helps AI choose appropriate dishes.
-- meal_type: Type of meal (sáng, trưa, tối). Default to "trưa" if not specified.
-- num_people: Number of people. Default to 1 if not specified.
-- preferences: Any dietary preferences or restrictions mentioned.
+PARSE_INTENT_PROMPT = """You are an intent parser. Extract ONLY what the user explicitly mentions:
 
-Return ONLY a valid JSON object with keys: budget, budget_specified, meal_type, num_people, preferences.
+- budget: Budget amount in VND (ONLY if user mentions specific number like "150k", "200000"). Return null if not mentioned.
+- num_people: Number of people (ONLY if user mentions like "cho 2 người", "3 người"). Return 1 if not mentioned.
+- preferences: Dietary preferences or restrictions (ONLY if user mentions like "ăn chay", "không ăn thịt bò"). Return empty array [] if not mentioned.
+
+IMPORTANT:
+- DO NOT infer meal_type (sáng/trưa/tối) - it will be auto-detected from current time
+- DO NOT infer budget if user doesn't mention it - it will be auto-calculated
+- ONLY extract what user explicitly says
+
+Return ONLY valid JSON:
+{{
+    "budget": number_or_null,
+    "num_people": number,
+    "preferences": ["preference1", "preference2"]
+}}
 
 Examples:
-- "Hôm nay ăn gì với 150k" → budget_specified: true
-- "Gợi ý bữa trưa" → budget_specified: false (using default 200k)
+- "Ăn gì với 150k" → {{"budget": 150000, "num_people": 1, "preferences": []}}
+- "Gợi ý món cho 3 người" → {{"budget": null, "num_people": 3, "preferences": []}}
+- "Ăn chay" → {{"budget": null, "num_people": 1, "preferences": ["ăn chay"]}}
+- "Hôm nay ăn gì" → {{"budget": null, "num_people": 1, "preferences": []}}
 
 User input: {user_input}"""
 
@@ -24,31 +34,18 @@ GENERATE_MENU_PROMPT = """BẠN LÀ CHUYÊN GIA LẬP THỰC ĐƠN. Nhiệm vụ
 
 🔴 QUY TẮC 1: NGÂN SÁCH QUYẾT ĐỊNH SỐ MÓN (BẮT BUỘC)
 - Tổng giá PHẢI <= {budget} VND (TUYỆT ĐỐI không vượt)
-- TARGET: Cố gắng sử dụng 70-85% ngân sách (không để dư quá nhiều, tận dụng tối đa trong giới hạn)
-- SỐ MÓN PHỤ THUỘC NGÂN SÁCH, KHÔNG BẮT BUỘC 3-5 MÓN:
+- TARGET: Sử dụng 80-95% ngân sách (tối thiểu 80%, không để dư quá nhiều)
+- SỐ MÓN PHỤ THUỘC NGÂN SÁCH:
   
-  • Ngân sách 40-70k: CHỈ 1-2 MÓN đơn giản
-    Ví dụ: 1 bát phở (35-50k), 1 tô bún (30-45k), 1 dĩa cơm gà (40-60k)
-    → Target: ~40-60k (70-85% của 40-70k)
-  
-  • Ngân sách 70-150k: 2-3 món (1 món chính + 1 món phụ hoặc canh)
-    Ví dụ: Cơm + thịt kho + rau xào
-    → Target: ~80-130k (70-85% của 70-150k)
-  
-  • Ngân sách 150-300k: 3-4 món (1 món chính + món phụ + canh)
-    Ví dụ: Cơm + cá kho + rau + canh
-    → Target: ~130-250k (70-85% của 150-300k)
-  
+  • Ngân sách 40-70k: 1-2 món đơn giản (phở, bún, cơm gà)
+  • Ngân sách 70-150k: 2-3 món (món chính + phụ/canh)
+  • Ngân sách 150-300k: 3-4 món (món chính + phụ + canh)
   • Ngân sách > 300k: 4-5 món đa dạng
-    Có thể thêm món phụ, canh, rau nếu còn dư ngân sách
-    → Target: ~70-85% của ngân sách
 
-- TRÁNG MIỆNG và ĐỒ UỐNG: KHÔNG BẮT BUỘC
-  → CHỈ thêm nếu sau khi có đủ món chính/phụ/canh và vẫn còn dư ≥ 30k (để đạt target 70-85%)
+- TRÁNG MIỆNG và ĐỒ UỐNG: CHỈ thêm nếu còn dư ngân sách
   → ĐỒ UỐNG PHẢI LÀ SẢN PHẨM ĐÓNG GÓI SẴN (lon, hộp): nước ngọt, nước suối, trà đóng chai, cà phê lon, sữa hộp...
-  → TUYỆT ĐỐI KHÔNG chế biến đồ uống từ nguyên liệu (ví dụ: KHÔNG làm "Sữa đậu nành" từ đậu nành + sữa tươi)
-  → Có thể gợi ý mua hoa quả để làm đồ uống hoặc tráng miệng 
-  → Đồ uống phải có giá cố định như sản phẩm đóng gói (10-25k/lon/hộp)
+  → TUYỆT ĐỐI KHÔNG chế biến đồ uống từ nguyên liệu
+  → Giá cố định: 10-25k/lon/hộp
 
 🔴 QUY TẮC 2: TUÂN THỦ QUY TẮC KẾT HỢP NGUYÊN LIỆU (NẾU CÓ)
 - Các quy tắc kết hợp nguyên liệu bên dưới chỉ là GỢI Ý, không bắt buộc nếu ngân sách thấp
@@ -59,6 +56,15 @@ GENERATE_MENU_PROMPT = """BẠN LÀ CHUYÊN GIA LẬP THỰC ĐƠN. Nhiệm vụ
 - Danh sách đã loại bỏ gia vị (muối, đường, dầu, nước mắm, tỏi, ớt...)
 - CHỈ gợi ý nguyên liệu CHÍNH: thịt, cá, rau, trứng, đậu phụ, tinh bột
 - KHÔNG thêm gia vị vào món ăn
+
+🔴 QUY TẮC 4: ƯU TIÊN RAU CỦ TƯƠI SỐNG (BẮT BUỘC)
+- RAU CỦ và HOA QUẢ: LUÔN ưu tiên đồ TƯƠI SỐNG trước
+- CHỈ sử dụng "rau củ đông lạnh", "rau củ đóng hộp" khi:
+  • KHÔNG còn rau củ tươi sống phù hợp trong danh sách
+  • Ngân sách quá thấp và chỉ có đông lạnh/đóng hộp rẻ hơn
+- Ví dụ:
+  ✓ Ưu tiên: "rau muống", "rau cải", "cà chua", "cà rốt", "hành tây" (tươi)
+  ✗ Tránh: "rau củ đông lạnh", "rau củ đóng hộp" (chỉ dùng khi không còn lựa chọn)
 
 🟡 KHUYẾN NGHỊ: ĐA DẠNG HÓA MÓN ĂN (NẾU NGÂN SÁCH CHO PHÉP)
 - Hãy sáng tạo và đa dạng hóa món ăn khi có đủ ngân sách
@@ -99,16 +105,10 @@ BƯỚC 2: CHỌN MÓN ƯU TIÊN
 - Ngân sách trung bình: Chọn món chính trước, sau đó món phụ/canh
 - Ngân sách cao: Đa dạng hóa món ăn
 
-BƯỚC 3: TỐI ƯU NGÂN SÁCH (QUAN TRỌNG)
-- Tính tổng giá từng món: price = base_price × quantity
-- Đảm bảo tổng giá <= {budget} VND
-- TARGET: Cố gắng đạt 70-85% ngân sách (ví dụ: budget 50k → target 35-42k, budget 200k → target 140-170k)
-- Cách đạt target:
-  • Tăng khẩu phần protein/rau nếu còn dư nhiều
-  • Thêm 1 món phụ/canh nếu budget cho phép
-  • Thêm tráng miệng/đồ uống nếu còn dư ≥ 30k sau khi có đủ món chính
-  • ĐỒ UỐNG: CHỈ thêm sản phẩm đóng gói sẵn (lon/hộp) với giá cố định 10-25k, KHÔNG chế biến từ nguyên liệu
-- KHÔNG thêm quá nhiều nếu user không yêu cầu cụ thể về số lượng
+BƯỚC 3: TỐI ƯU NGÂN SÁCH
+- Tính tổng giá: price = base_price × quantity cho từng nguyên liệu
+- Đảm bảo tổng giá <= {budget} VND và >= 80% budget
+- Nếu còn dư ngân sách: tăng khẩu phần, thêm món phụ/canh, hoặc tráng miệng/đồ uống (sản phẩm đóng gói 10-25k)
 
 BƯỚC 4: ĐA DẠNG HÓA (nếu ngân sách cho phép)
 - Thử protein khác nhau, phương pháp khác nhau
@@ -133,24 +133,18 @@ BƯỚC 4: ĐA DẠNG HÓA (nếu ngân sách cho phép)
 
 ADJUST_MENU_PROMPT = """CHỈNH SỬA MENU ĐỂ PHÙ HỢP NGÂN SÁCH.
 
+{enhancement_note}
+
 ⚠️  QUY TẮC BẮT BUỘC:
 - CHỈ sử dụng nguyên liệu CHÍNH từ danh sách (thịt, cá, rau, tinh bột)
 - KHÔNG thêm gia vị (muối, đường, dầu, nước mắm, xì dầu, tỏi, ớt...)
-- Tổng giá PHẢI <= {budget} VND
-- SỐ MÓN PHỤ THUỘC NGÂN SÁCH, có thể giảm xuống 1-2 món nếu ngân sách thấp
-
-💡 KHUYẾN NGHỊ KHI ĐIỀU CHỈNH:
-- Nếu có thể, hãy thay đổi món ăn thay vì chỉ giảm khẩu phần
-- Thử các món khác đa dạng hơn với nguyên liệu rẻ hơn
+- RAU CỦ: Ưu tiên đồ TƯƠI SỐNG, chỉ dùng đông lạnh/đóng hộp khi không còn lựa chọn
+- Tổng giá PHẢI <= {budget} VND và >= 80% budget
 - Ưu tiên món ăn gia đình Việt Nam truyền thống
-- BỎ tráng miệng/đồ uống trước tiên nếu có
 
 CHIẾN LƯỢC ĐIỀU CHỈNH (theo thứ tự ưu tiên):
-1. Bỏ tráng miệng và đồ uống (nếu có) - đồ uống là sản phẩm đóng gói sẵn, dễ bỏ nhất
-2. Giảm số lượng món nếu ngân sách quá thấp (có thể chỉ còn 1-2 món)
-3. Thay món đắt bằng món rẻ hơn (cá hồi → cá basa, thịt bò → thịt gà/heo)
-4. Giảm khẩu phần protein
-5. Bỏ món phụ/canh nếu thực sự cần thiết, chỉ giữ món chính
+1. VƯỢT BUDGET: Bỏ tráng miệng/đồ uống → Giảm số món → Thay món đắt bằng rẻ hơn → Giảm khẩu phần
+2. DƯỚI 80% BUDGET: Tăng khẩu phần → Thêm món phụ/canh → Thêm tráng miệng/đồ uống (10-25k) → Nâng cấp nguyên liệu → Thêm món mới
 
 ⚠️  LƯU Ý VỀ ĐỒ UỐNG:
 - Đồ uống PHẢI là sản phẩm đóng gói sẵn (lon, hộp): nước ngọt, nước suối, trà đóng chai, cà phê lon, sữa hộp...

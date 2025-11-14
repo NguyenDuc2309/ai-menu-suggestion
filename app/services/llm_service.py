@@ -54,17 +54,14 @@ class LLMService:
             import json
             import re
             
-            # Get response content
             content = response.content.strip()
             print(f"[LLM] parse_intent response (first 500 chars): {content[:500]}")
             
-            # Try to extract JSON from markdown code blocks
             json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', content, re.DOTALL)
             if json_match:
                 content = json_match.group(1).strip()
                 print(f"[LLM] Extracted JSON from markdown: {content[:200]}...")
             else:
-                # Try to find JSON object by finding balanced braces
                 start_idx = content.find('{')
                 if start_idx != -1:
                     brace_count = 0
@@ -85,15 +82,20 @@ class LLMService:
                 else:
                     print("[LLM] No '{' found, trying to parse entire content")
             
-            # Validate content before parsing
             if not content or not content.strip().startswith('{'):
                 raise ValueError(f"Response does not contain valid JSON. Content: {content[:200]}")
             
             intent = json.loads(content)
             
-            # Validate intent structure
             if not isinstance(intent, dict):
                 raise ValueError(f"Parsed JSON is not a dictionary: {type(intent)}")
+            
+            if "budget" not in intent:
+                intent["budget"] = None
+            if "num_people" not in intent:
+                intent["num_people"] = 1
+            if "preferences" not in intent:
+                intent["preferences"] = []
             
             return intent
         except json.JSONDecodeError as e:
@@ -136,22 +138,18 @@ class LLMService:
         previous_dishes: List[str] = None,
         budget_specified: bool = True
     ) -> Dict[str, Any]:
-        # Format ingredients list
-        # base_price is price per unit, quantity is stock
         ingredients_list = []
         for ing in ingredients:
-            quantity = ing['quantity']  # stock quantity
-            base_price = ing['base_price']  # price per unit
+            quantity = ing['quantity']
+            base_price = ing['base_price']
             unit = ing.get('unit', 'g')
             ingredients_list.append(
                 f"- {ing['name']}: {quantity} {unit} tồn kho (Giá mỗi {unit}: {base_price} VND)"
             )
         ingredients_text = "\n".join(ingredients_list)
         
-        # Format combination rules context
         context_text = "\n\n".join(context) if context else "Không có quy tắc kết hợp. Hãy tạo menu hợp lý dựa trên nguyên liệu có sẵn."
         
-        # Format previous dishes context
         if previous_dishes and len(previous_dishes) > 0:
             dishes_list = ", ".join(previous_dishes)
             previous_dishes_text = f"""🔔 LƯU Ý QUAN TRỌNG: TRÁNH LẶP MÓN ĂN
@@ -160,21 +158,11 @@ Người dùng này gần đây đã được gợi ý các món: {dishes_list}
         else:
             previous_dishes_text = ""
         
-        # Format budget context
         if not budget_specified:
-            # User did not specify budget, suggest reasonable dishes at average price per person
-            # Average meal price per person in Vietnam: ~50-80k
-            avg_per_person_low = 50000
-            avg_per_person_high = 80000
-            target_low = avg_per_person_low * num_people
-            target_high = avg_per_person_high * num_people
-            
-            budget_context = f"""⚠️  LƯU Ý: Người dùng KHÔNG yêu cầu ngân sách cụ thể.
-→ Đề xuất món ăn ở mức GIÁ TRUNG BÌNH: ~{avg_per_person_low//1000}-{avg_per_person_high//1000}k/người
-→ Target cho {num_people} người: ~{target_low:,}-{target_high:,} VND (KHÔNG cần dùng hết {budget:,.0f} VND)
-→ Chọn món phổ biến, hợp lý, không quá đắt hay sang trọng."""
+            budget_context = f"""⚠️  LƯU Ý: Người dùng KHÔNG nhập ngân sách.
+→ Hệ thống đã tự đặt ngân sách PHÙ HỢP với loại bữa và số người: {budget:,.0f} VND.
+→ Hãy tạo menu ngon, hợp lý và KHÔNG ĐƯỢC VƯỢT quá {budget:,.0f} VND."""
         else:
-            # User specified budget, try to use 70-85% of it
             budget_context = f"""✓ Người dùng YÊU CẦU ngân sách {budget:,.0f} VND.
 → Cố gắng tận dụng 70-85% ngân sách (khoảng {int(budget * 0.7):,}-{int(budget * 0.85):,} VND)."""
         
@@ -205,13 +193,11 @@ Người dùng này gần đây đã được gợi ý các món: {dishes_list}
             print(f"[LLM] generate_menu response (first 500 chars): {content[:500]}")
             print(f"[LLM] generate_menu response length: {len(content)}")
             
-            # Try to extract JSON from markdown code blocks
             json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', content, re.DOTALL)
             if json_match:
                 content = json_match.group(1).strip()
                 print(f"[LLM] Extracted JSON from markdown: {content[:200]}...")
             else:
-                # Try to find JSON object by finding balanced braces
                 start_idx = content.find('{')
                 if start_idx != -1:
                     brace_count = 0
@@ -232,13 +218,11 @@ Người dùng này gần đây đã được gợi ý các món: {dishes_list}
                 else:
                     print("[LLM] No '{' found, trying to parse entire content")
             
-            # Validate content before parsing
             if not content or not content.strip().startswith('{'):
                 raise ValueError(f"Response does not contain valid JSON. Content: {content[:200]}")
             
             menu = json.loads(content)
             
-            # Validate menu structure
             if not isinstance(menu, dict):
                 raise ValueError(f"Parsed JSON is not a dictionary: {type(menu)}")
             if "items" not in menu:
@@ -270,11 +254,9 @@ Người dùng này gần đây đã được gợi ý các món: {dishes_list}
                 print(f"[LLM] Full response content: {response.content}")
             if 'content' in locals():
                 print(f"[LLM] Extracted content: {content[:500]}")
-            # Check if it's a quota/rate limit error (works for both Gemini and OpenAI)
             if ("quota" in error_str or "429" in error_str or "resourceexhausted" in error_str or 
                 "ratelimit" in error_str or "rate_limit" in error_str or error_type == "RateLimitError"):
                 raise ValueError(f"API quota/rate limit exceeded: {str(e)}")
-            # Check if it's an authentication error
             if ("api key" in error_str or "api_key" in error_str or "unauthorized" in error_str or 
                 "401" in error_str or "authentication" in error_str or error_type == "AuthenticationError"):
                 raise ValueError(f"API authentication error: {str(e)}")
@@ -285,29 +267,51 @@ Người dùng này gần đây đã được gợi ý các món: {dishes_list}
         menu: Dict[str, Any],
         validation_errors: List[str],
         available_ingredients: List[Dict[str, Any]],
-        budget: float
+        budget: float,
+        needs_enhancement: bool = False
     ) -> Dict[str, Any]:
         errors_text = "\n".join([f"- {err}" for err in validation_errors])
         
-        # Format available ingredients
-        # base_price is price per unit, quantity is stock
         ingredients_list = []
         for ing in available_ingredients:
-            quantity = ing['quantity']  # stock quantity
-            base_price = ing['base_price']  # price per unit
+            quantity = ing['quantity']
+            base_price = ing['base_price']
             unit = ing.get('unit', 'g')
             ingredients_list.append(
                 f"- {ing['name']}: {quantity} {unit} tồn kho (Giá mỗi {unit}: {base_price} VND)"
             )
         ingredients_text = "\n".join(ingredients_list)
         
+        if needs_enhancement:
+            min_target = budget * 0.80
+            max_target = budget * 0.95
+            enhancement_note = f"""⚠️  QUAN TRỌNG: MENU HIỆN TẠI DÙNG QUÁ ÍT NGÂN SÁCH
+→ Menu hiện tại chỉ dùng dưới 80% ngân sách ({budget:,.0f} VND)
+→ CẦN TĂNG menu lên để đạt TỐI THIỂU {min_target:,.0f} VND (80% budget)
+→ Target: {min_target:,.0f} - {max_target:,.0f} VND (80-95% budget)
+→ KHÔNG được vượt quá {budget:,.0f} VND
+
+CHIẾN LƯỢC TĂNG MENU (theo thứ tự ưu tiên):
+1. Tăng khẩu phần protein/rau trong các món hiện có
+2. Thêm món phụ/canh nếu chưa có đủ
+3. Thêm tráng miệng/đồ uống (sản phẩm đóng gói sẵn 10-25k) nếu còn dư ngân sách
+4. Nâng cấp nguyên liệu (ví dụ: thịt gà → thịt bò nếu budget cho phép)
+5. Thêm món mới đa dạng hơn
+
+LƯU Ý: Tăng chất lượng và số lượng món, KHÔNG chỉ tăng giá đơn thuần."""
+        else:
+            enhancement_note = ""
+        
+        prompt_content = ADJUST_MENU_PROMPT.format(
+            menu=menu,
+            errors_text=errors_text,
+            ingredients_text=ingredients_text,
+            budget=budget,
+            enhancement_note=enhancement_note
+        )
+        
         prompt = ChatPromptTemplate.from_messages([
-            HumanMessage(content=ADJUST_MENU_PROMPT.format(
-                menu=menu,
-                errors_text=errors_text,
-                ingredients_text=ingredients_text,
-                budget=budget
-            ))
+            HumanMessage(content=prompt_content)
         ])
         
         try:
@@ -316,17 +320,14 @@ Người dùng này gần đây đã được gợi ý các món: {dishes_list}
             import json
             import re
             
-            # Get response content
             content = response.content.strip()
             print(f"[LLM] adjust_menu response (first 500 chars): {content[:500]}")
             
-            # Try to extract JSON from markdown code blocks
             json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', content, re.DOTALL)
             if json_match:
                 content = json_match.group(1).strip()
                 print(f"[LLM] Extracted JSON from markdown: {content[:200]}...")
             else:
-                # Try to find JSON object by finding balanced braces
                 start_idx = content.find('{')
                 if start_idx != -1:
                     brace_count = 0
@@ -347,13 +348,11 @@ Người dùng này gần đây đã được gợi ý các món: {dishes_list}
                 else:
                     print("[LLM] No '{' found, trying to parse entire content")
             
-            # Validate content before parsing
             if not content or not content.strip().startswith('{'):
                 raise ValueError(f"Response does not contain valid JSON. Content: {content[:200]}")
             
             adjusted_menu = json.loads(content)
             
-            # Validate menu structure
             if not isinstance(adjusted_menu, dict):
                 raise ValueError(f"Parsed JSON is not a dictionary: {type(adjusted_menu)}")
             if "items" not in adjusted_menu:
@@ -385,18 +384,15 @@ Người dùng này gần đây đã được gợi ý các món: {dishes_list}
                 print(f"[LLM] Full response content: {response.content}")
             if 'content' in locals():
                 print(f"[LLM] Extracted content: {content[:500]}")
-            # Check if it's a quota/rate limit error (works for both Gemini and OpenAI)
             if ("quota" in error_str or "429" in error_str or "resourceexhausted" in error_str or 
                 "ratelimit" in error_str or "rate_limit" in error_str or error_type == "RateLimitError"):
                 raise ValueError(f"API quota/rate limit exceeded: {str(e)}")
-            # Check if it's an authentication error
             if ("api key" in error_str or "api_key" in error_str or "unauthorized" in error_str or 
                 "401" in error_str or "authentication" in error_str or error_type == "AuthenticationError"):
                 raise ValueError(f"API authentication error: {str(e)}")
             raise ValueError(f"Failed to adjust menu: {str(e)}")
 
 
-# Singleton instance
 _llm_service: LLMService = None
 
 

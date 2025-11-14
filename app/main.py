@@ -8,17 +8,14 @@ from fastapi import HTTPException
 from app.config import config
 from app.api.routes import router
 
-# Suppress Python version warning from google.api_core
 warnings.filterwarnings("ignore", category=FutureWarning, module="google.api_core")
 
-# Validate configuration
 try:
     config.validate()
 except ValueError as e:
     print(f"Configuration error: {e}")
     print("Please check your .env file")
 
-# Create FastAPI app with Swagger UI configuration
 app = FastAPI(
     title=config.API_TITLE,
     version=config.API_VERSION,
@@ -35,7 +32,6 @@ app = FastAPI(
     }
 )
 
-# Custom exception handler for HTTPException
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
     return JSONResponse(
@@ -46,7 +42,6 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         }
     )
 
-# Custom exception handler for validation errors
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     return JSONResponse(
@@ -57,16 +52,14 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         }
     )
 
-# Setup CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify actual origins
+    allow_origins=["*"],  
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include routers
 app.include_router(router)
 
 
@@ -76,7 +69,7 @@ async def health_check():
     return {
         "status": "healthy",
         "llm_provider": config.LLM_PROVIDER,
-        "embedding_provider": "gemini",  # Always Gemini for embedding
+        "embedding_provider": "gemini", 
         "version": config.API_VERSION
     }
 

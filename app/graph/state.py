@@ -37,5 +37,6 @@ class MenuGraphState(TypedDict):
     
     # Budget validation
     needs_adjustment: Optional[bool]
+    needs_enhancement: Optional[bool]
     budget_error: Optional[str]
 

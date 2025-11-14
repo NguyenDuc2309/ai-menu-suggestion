@@ -17,16 +17,13 @@ class VectorStoreService:
         if not config.GEMINI_API_KEY:
             raise ValueError("Missing GEMINI_API_KEY")
         
-        # Set Pinecone API key as environment variable for langchain-pinecone
         os.environ["PINECONE_API_KEY"] = config.PINECONE_API_KEY
         
-        # Initialize Google embeddings with 768 dimension (default)
         self.embeddings = GoogleGenerativeAIEmbeddings(
             model="models/text-embedding-004",
             google_api_key=config.GEMINI_API_KEY
         )
         
-        # Initialize Pinecone vector store
         self.vector_store = PineconeVectorStore(
             index_name=config.PINECONE_INDEX_NAME,
             embedding=self.embeddings
@@ -49,20 +46,17 @@ class VectorStoreService:
         Returns:
             List of combination rule documents as strings
         """
-        # Build query text focusing on ingredient combination rules for meal type
         query_text = f"Quy tắc kết hợp nguyên liệu món ăn Việt Nam bữa {meal_type}"
         if ingredients:
-            ingredients_text = ", ".join(ingredients[:5])  # Limit to first 5 ingredients
+            ingredients_text = ", ".join(ingredients[:5])  
             query_text += f" với nguyên liệu: {ingredients_text}"
         
         try:
-            # Query the vector store for combination rules
             results = self.vector_store.similarity_search(
                 query_text,
                 k=top_k
             )
             
-            # Extract text content from rule documents
             rule_docs = [doc.page_content for doc in results]
             return rule_docs
         
@@ -84,7 +78,6 @@ class VectorStoreService:
         return self.query_combination_rules(meal_type, ingredients, top_k)
 
 
-# Singleton instance
 _vector_store_service: VectorStoreService = None
 
 

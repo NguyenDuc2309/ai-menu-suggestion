@@ -76,6 +76,7 @@ async def suggest_menu(request: Request, menu_request: MenuRequest) -> MenuRespo
             "error": None,
             "iteration_count": 0,
             "needs_adjustment": None,
+            "needs_enhancement": None,
             "budget_error": None
         }
         
@@ -189,15 +190,13 @@ async def suggest_menu(request: Request, menu_request: MenuRequest) -> MenuRespo
                 )
             )
         
-        # Get intent info
         intent = final_state.get("intent", {})
         meal_type = final_response.get("meal_type", intent.get("meal_type", "trưa"))
         total_budget = intent.get("budget", 200000)
-        # Recalculate total price from recalculated dish prices
+        budget_specified = intent.get("budget_specified", False)
+        
         total_estimated_price = sum(dish.total_price for dish in menu_dishes)
         
-        # Budget validation is now handled in the graph, but double-check here
-        # Allow 5% tolerance for rounding
         if total_estimated_price > total_budget * 1.05:
             error_msg = f"Generated menu exceeds budget: {total_estimated_price:,.0f} VND > {total_budget:,.0f} VND"
             print(f"[REQUEST] Budget validation failed: {error_msg}")
@@ -207,20 +206,34 @@ async def suggest_menu(request: Request, menu_request: MenuRequest) -> MenuRespo
                 detail=f"Failed to generate menu within budget. Menu cost: {total_estimated_price:,.0f} VND, Budget: {total_budget:,.0f} VND"
             )
         
-        # Generate message
         num_dishes = len(menu_dishes)
-        meal_type_display = {"sáng": "bữa sáng", "trưa": "bữa trưa", "tối": "bữa tối"}.get(meal_type, meal_type)
-        budget_formatted = f"{total_budget:,.0f}".replace(",", ".")
+        meal_type_specified = intent.get("meal_type_specified", False)
+        price_formatted = f"{total_estimated_price:,.0f}".replace(",", ".")
         
-        # Create contextual message based on budget and number of dishes
-        if total_budget < 70000:
-            context = "Với ngân sách này, "
-        elif num_dishes <= 2:
-            context = "Với ngân sách hạn chế, "
+        if budget_specified and meal_type_specified:
+            budget_formatted = f"{total_budget:,.0f}".replace(",", ".")
+            meal_type_display = {"sáng": "bữa sáng", "trưa": "bữa trưa", "tối": "bữa tối"}.get(meal_type, meal_type)
+            if total_budget < 70000:
+                context = "Với ngân sách này, "
+            elif num_dishes <= 2:
+                context = "Với ngân sách hạn chế, "
+            else:
+                context = ""
+            message = f"{context}Tôi gợi ý cho bạn {num_dishes} món cho {meal_type_display}, tổng chi phí khoảng {price_formatted} VND (ngân sách {budget_formatted} VND)."
+        elif budget_specified:
+            budget_formatted = f"{total_budget:,.0f}".replace(",", ".")
+            if total_budget < 70000:
+                context = "Với ngân sách này, "
+            elif num_dishes <= 2:
+                context = "Với ngân sách hạn chế, "
+            else:
+                context = ""
+            message = f"{context}Tôi gợi ý cho bạn {num_dishes} món, tổng chi phí khoảng {price_formatted} VND (ngân sách {budget_formatted} VND)."
+        elif meal_type_specified:
+            meal_type_display = {"sáng": "bữa sáng", "trưa": "bữa trưa", "tối": "bữa tối"}.get(meal_type, meal_type)
+            message = f"Tôi gợi ý cho bạn {num_dishes} món cho {meal_type_display}, tổng chi phí khoảng {price_formatted} VND."
         else:
-            context = ""
-        
-        message = f"{context}Tôi gợi ý cho bạn {num_dishes} món cho {meal_type_display}, tổng chi phí khoảng {f'{total_estimated_price:,.0f}'.replace(',', '.')} VND (ngân sách {budget_formatted} VND)."
+            message = f"Tôi gợi ý cho bạn {num_dishes} món, tổng chi phí khoảng {price_formatted} VND."
         
         menu_data = MenuData(
             meal_type=meal_type,
