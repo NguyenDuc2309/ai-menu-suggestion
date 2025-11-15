@@ -17,9 +17,9 @@ except ValueError as e:
     print("Please check your .env file")
 
 app = FastAPI(
-    title=config.API_TITLE,
-    version=config.API_VERSION,
-    description=config.API_DESCRIPTION,
+    title='Menu Suggestion API',
+    version='1.0.0',
+    description='AI-powered menu suggestion system using LangGraph and Pinecone',
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json",

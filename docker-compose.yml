@@ -1,0 +1,14 @@
+services:
+  menu-suggestion-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: menu-suggestion-api:1.0
+    container_name: menu-suggestion-api
+    ports:
+      - "${PORT}:${PORT}"
+    env_file:
+      - .env
+    environment:
+      - PORT=${PORT}
+    restart: unless-stopped

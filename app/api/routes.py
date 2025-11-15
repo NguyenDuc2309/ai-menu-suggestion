@@ -131,7 +131,7 @@ async def suggest_menu(request: Request, menu_request: MenuRequest) -> MenuRespo
                 raise HTTPException(status_code=503, detail="Service configuration error")
             else:
                 print("[REQUEST] Error type: General failure")
-                raise HTTPException(status_code=500, detail="Failed to generate menu")
+                raise HTTPException(status_code=500, detail=clean_error)
         
         final_response = final_state.get("final_response")
         if not final_response:
@@ -140,7 +140,7 @@ async def suggest_menu(request: Request, menu_request: MenuRequest) -> MenuRespo
         # Check if menu is empty (indicates error)
         menu_items_list = final_response.get("menu_items", [])
         if not menu_items_list:
-            raise HTTPException(status_code=500, detail="Failed to generate menu items")
+            raise HTTPException(status_code=500, detail="Failed to generate items")
         
         metadata = {
             "process_time": round(total_time, 3)
@@ -170,7 +170,10 @@ async def suggest_menu(request: Request, menu_request: MenuRequest) -> MenuRespo
                     base_price = available_ing["base_price"]  # price per unit
                     calculated_price = base_price * ing_quantity
                 else:
-                    calculated_price = ing.get("price", 0)
+                    # Không cho phép sử dụng nguyên liệu không có trong stock
+                    error_msg = f"Menu uses ingredient not in available stock: {ing_name}"
+                    print(f"[REQUEST] CRITICAL: {error_msg}")
+                    raise HTTPException(status_code=500, detail=error_msg)
                 
                 ingredients.append(
                     IngredientItem(
@@ -203,7 +206,7 @@ async def suggest_menu(request: Request, menu_request: MenuRequest) -> MenuRespo
             print(f"[REQUEST] This should have been caught by validate_budget_node!")
             raise HTTPException(
                 status_code=500, 
-                detail=f"Failed to generate menu within budget. Menu cost: {total_estimated_price:,.0f} VND, Budget: {total_budget:,.0f} VND"
+                detail=f"Failed to generate within budget. Menu cost: {total_estimated_price:,.0f} VND, Budget: {total_budget:,.0f} VND"
             )
         
         num_dishes = len(menu_dishes)

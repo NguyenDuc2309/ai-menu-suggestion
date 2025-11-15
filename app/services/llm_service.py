@@ -8,7 +8,7 @@ from langchain.prompts import ChatPromptTemplate
 from langchain.schema import HumanMessage, SystemMessage
 from google.api_core import exceptions as google_exceptions
 from app.config import config
-from app.prompts import PARSE_INTENT_PROMPT, GENERATE_MENU_PROMPT, ADJUST_MENU_PROMPT
+from app.prompts import PARSE_INTENT_PROMPT, GENERATE_MENU_PROMPT, ADJUST_MENU_PROMPT, SQL_WHERE_CLAUSE_PROMPT
 
 
 def clean_json_string(content: str) -> str:
@@ -139,6 +139,44 @@ def parse_json_with_fallback(content: str, context: str = "") -> Dict[str, Any]:
     raise ValueError(f"{error_msg}. Invalid JSON response from LLM.")
 
 
+def format_ingredients_text(ingredients: List[Dict[str, Any]]) -> str:
+    """Format ingredients list into text with header/footer for LLM prompt."""
+    ingredients_list = []
+    for idx, ing in enumerate(ingredients, 1):
+        quantity = ing['quantity']
+        base_price = ing['base_price']
+        unit = ing.get('unit', 'g')
+        ingredients_list.append(
+            f"{idx}. {ing['name']}: {quantity} {unit} tồn kho (Giá mỗi {unit}: {base_price} VND)"
+        )
+    return f"""=== DANH SÁCH NGUYÊN LIỆU CÓ SẴN (CHỈ ĐƯỢC DÙNG CÁC NGUYÊN LIỆU NÀY) ===
+
+{chr(10).join(ingredients_list)}
+
+⚠️ LƯU Ý QUAN TRỌNG: CHỈ ĐƯỢC DÙNG CÁC NGUYÊN LIỆU TRÊN. KHÔNG ĐƯỢC TỰ TẠO THÊM NGUYÊN LIỆU MỚI. === """
+
+
+def validate_menu_ingredients(menu: Dict[str, Any], available_ingredients: List[Dict[str, Any]], context: str = "menu") -> None:
+    """Validate that all ingredients in menu are in available_ingredients list."""
+    available_names = {ing['name'].lower() for ing in available_ingredients}
+    invalid_ingredients = []
+    
+    for item in menu.get("items", []):
+        for ing in item.get("ingredients", []):
+            ing_name = ing.get("name", "").strip()
+            if not ing_name:
+                continue
+            if ing_name.lower() not in available_names:
+                invalid_ingredients.append(ing_name)
+    
+    if invalid_ingredients:
+        invalid_list = ", ".join(set(invalid_ingredients))
+        available_list = ", ".join([ing['name'] for ing in available_ingredients])
+        error_msg = f"{context.capitalize()} contains invalid ingredients not in available list: {invalid_list}. Available ingredients: {available_list}"
+        print(f"[LLM] VALIDATION FAILED: {error_msg}")
+        raise ValueError(error_msg)
+
+
 class LLMService:
     """Service for LLM operations with configurable provider (Gemini/OpenAI)."""
     
@@ -164,7 +202,7 @@ class LLMService:
             
             self.llm = ChatOpenAI(
                 model="gpt-4o-mini",  
-                temperature=0.8,  
+                temperature=0.7,  
                 openai_api_key=config.OPENAI_API_KEY,
                 max_retries=0 
             )
@@ -230,6 +268,55 @@ class LLMService:
                 raise ValueError(f"API authentication error: {str(e)}")
             raise ValueError(f"Failed to parse intent: {str(e)}")
     
+    def generate_sql_where_clause(
+        self,
+        budget: int,
+        meal_type: str,
+        num_people: int,
+        preferences: List[str]
+    ) -> str:
+        """Generate SQL WHERE clause from intent to filter ingredients."""
+        preferences_str = ", ".join(preferences) if preferences else "none"
+        
+        prompt = ChatPromptTemplate.from_messages([
+            HumanMessage(content=SQL_WHERE_CLAUSE_PROMPT.format(
+                budget=budget,
+                meal_type=meal_type,
+                num_people=num_people,
+                preferences=preferences_str
+            ))
+        ])
+        
+        try:
+            print("[LLM] generate_sql_where_clause: Invoking LLM...")
+            response = self.llm.invoke(prompt.format_messages())
+            
+            if not hasattr(response, 'content') or response.content is None:
+                raise ValueError("LLM response has no content")
+            
+            content = response.content.strip()
+            
+            # Clean up response
+            content = re.sub(r'```(?:sql)?\s*', '', content)
+            content = re.sub(r'WHERE\s+', '', content, flags=re.IGNORECASE)
+            content = content.strip('`').strip()
+            
+            print(f"[LLM] generate_sql_where_clause: {content[:150]}")
+            return content
+            
+        except google_exceptions.ResourceExhausted as e:
+            print(f"[LLM] generate_sql_where_clause: ResourceExhausted")
+            raise ValueError(f"API quota exceeded: {str(e)}")
+        except Exception as e:
+            error_str = str(e).lower()
+            error_type = type(e).__name__
+            print(f"[LLM] Error generating SQL ({self.provider}): {error_type}: {e}")
+            if ("quota" in error_str or "429" in error_str or "resourceexhausted" in error_str):
+                raise ValueError(f"API quota exceeded: {str(e)}")
+            if ("api key" in error_str or "unauthorized" in error_str or "401" in error_str):
+                raise ValueError(f"API authentication error: {str(e)}")
+            raise ValueError(f"Failed to generate SQL: {str(e)}")
+    
     def generate_menu(
         self,
         ingredients: List[Dict[str, Any]],
@@ -238,19 +325,17 @@ class LLMService:
         num_people: int,
         budget: float,
         previous_dishes: List[str] = None,
-        budget_specified: bool = True
+        budget_specified: bool = True,
+        preferences: List[str] | None = None,
     ) -> Dict[str, Any]:
-        ingredients_list = []
-        for ing in ingredients:
-            quantity = ing['quantity']
-            base_price = ing['base_price']
-            unit = ing.get('unit', 'g')
-            ingredients_list.append(
-                f"- {ing['name']}: {quantity} {unit} tồn kho (Giá mỗi {unit}: {base_price} VND)"
-            )
-        ingredients_text = "\n".join(ingredients_list)
+        ingredients_text = format_ingredients_text(ingredients)
         
         context_text = "\n\n".join(context) if context else "Không có quy tắc kết hợp. Hãy tạo menu hợp lý dựa trên nguyên liệu có sẵn."
+
+        if preferences:
+            preferences_text = ", ".join(preferences)
+        else:
+            preferences_text = "Không có (user không yêu cầu cụ thể)."
         
         if previous_dishes and len(previous_dishes) > 0:
             dishes_list = ", ".join(previous_dishes)
@@ -273,6 +358,7 @@ Người dùng này gần đây đã được gợi ý các món: {dishes_list}
                 meal_type=meal_type,
                 num_people=num_people,
                 budget=budget,
+                preferences_text=preferences_text,
                 ingredients_text=ingredients_text,
                 context_text=context_text,
                 previous_dishes_text=previous_dishes_text,
@@ -298,18 +384,27 @@ Người dùng này gần đây đã được gợi ý các món: {dishes_list}
             if "items" not in menu:
                 raise ValueError(f"Menu JSON missing 'items' key. Keys: {list(menu.keys())}")
             
+            validate_menu_ingredients(menu, ingredients, "menu")
             return menu
+        except ValueError as e:
+            error_msg = str(e)
+            if "Failed to parse JSON" in error_msg or "Invalid JSON" in error_msg:
+                print(f"[LLM] JSON parsing failed: {error_msg}")
+                print(f"[LLM] Full response content: {response.content if 'response' in locals() else 'N/A'}")
+                print(f"[LLM] Extracted content that failed: {content if 'content' in locals() else 'N/A'}")
+                raise ValueError(f"Failed to generate menu: {error_msg}")
+            raise
         except json.JSONDecodeError as e:
             print(f"[LLM] JSONDecodeError: {e}")
             print(f"[LLM] Error at position: {e.pos if hasattr(e, 'pos') else 'N/A'}")
             print(f"[LLM] Full response content: {response.content if 'response' in locals() else 'N/A'}")
             print(f"[LLM] Extracted content that failed: {content if 'content' in locals() else 'N/A'}")
-            raise ValueError(f"Failed to generate menu: Invalid JSON response from LLM. Error: {str(e)}")
+            raise ValueError(f"Failed to generate: Invalid JSON response from LLM. Error: {str(e)}")
         except KeyError as e:
             print(f"[LLM] KeyError: Missing key {e}")
             print(f"[LLM] Full response content: {response.content if 'response' in locals() else 'N/A'}")
             print(f"[LLM] Parsed menu keys: {list(menu.keys()) if 'menu' in locals() else 'N/A'}")
-            raise ValueError(f"Failed to generate menu: Missing required key in response. {str(e)}")
+            raise ValueError(f"Failed to generate: Missing required key in response. {str(e)}")
         except google_exceptions.ResourceExhausted as e:
             print(f"[LLM] generate_menu: ResourceExhausted caught immediately - Quota exceeded!")
             print(f"[LLM] generate_menu: Error details: {e}")
@@ -330,7 +425,7 @@ Người dùng này gần đây đã được gợi ý các món: {dishes_list}
             if ("api key" in error_str or "api_key" in error_str or "unauthorized" in error_str or 
                 "401" in error_str or "authentication" in error_str or error_type == "AuthenticationError"):
                 raise ValueError(f"API authentication error: {str(e)}")
-            raise ValueError(f"Failed to generate menu: {str(e)}")
+            raise ValueError(f"Failed to generate: {str(e)}")
     
     def adjust_menu(
         self,
@@ -342,15 +437,7 @@ Người dùng này gần đây đã được gợi ý các món: {dishes_list}
     ) -> Dict[str, Any]:
         errors_text = "\n".join([f"- {err}" for err in validation_errors])
         
-        ingredients_list = []
-        for ing in available_ingredients:
-            quantity = ing['quantity']
-            base_price = ing['base_price']
-            unit = ing.get('unit', 'g')
-            ingredients_list.append(
-                f"- {ing['name']}: {quantity} {unit} tồn kho (Giá mỗi {unit}: {base_price} VND)"
-            )
-        ingredients_text = "\n".join(ingredients_list)
+        ingredients_text = format_ingredients_text(available_ingredients)
         
         if needs_enhancement:
             min_target = budget * 0.80
@@ -400,6 +487,7 @@ LƯU Ý: Tăng chất lượng và số lượng món, KHÔNG chỉ tăng giá �
             if "items" not in adjusted_menu:
                 raise ValueError(f"Menu JSON missing 'items' key. Keys: {list(adjusted_menu.keys())}")
             
+            validate_menu_ingredients(adjusted_menu, available_ingredients, "adjusted menu")
             return adjusted_menu
         except json.JSONDecodeError as e:
             print(f"[LLM] JSONDecodeError: {e}")

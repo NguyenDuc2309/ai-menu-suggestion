@@ -22,13 +22,6 @@ class Config:
     PINECONE_ENVIRONMENT: str = os.getenv("PINECONE_ENVIRONMENT", "")
     PINECONE_INDEX_NAME: str = os.getenv("PINECONE_INDEX_NAME", "")
     
-    # API Configuration
-    API_TITLE: str = os.getenv("API_TITLE", "AI Menu Suggestion API")
-    API_VERSION: str = os.getenv("API_VERSION", "1.0.0")
-    API_DESCRIPTION: str = os.getenv(
-        "API_DESCRIPTION",
-        "AI-powered menu suggestion system using LangGraph and Pinecone"
-    )
     PORT: int = int(os.getenv("PORT", "8000"))
     HOST: str = os.getenv("HOST", "0.0.0.0")
     

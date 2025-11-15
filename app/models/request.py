@@ -16,7 +16,7 @@ class MenuRequest(BaseModel):
     )
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "examples": [
                 {
                     "query": "Gợi ý bữa trưa 200k cho 2 người",
