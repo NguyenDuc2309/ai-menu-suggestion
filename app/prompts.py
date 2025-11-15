@@ -36,7 +36,12 @@ Trả chỉ WHERE clause, không SELECT hay WHERE."""
 
 GENERATE_MENU_PROMPT = """Tạo menu từ nguyên liệu có sẵn, phù hợp ngân sách và người dùng.
 
-Chỉ được dùng nguyên liệu trong danh sách có sẵn. Không thêm nguyên liệu mới.
+🚨 QUY TẮC TUYỆT ĐỐI - KHÔNG ĐƯỢC VI PHẠM:
+════════════════════════════════════════════════
+CHỈ ĐƯỢC DÙNG NGUYÊN LIỆU TRONG DANH SÁCH BÊN DƯỚI.
+TUYỆT ĐỐI KHÔNG ĐƯỢC TỰ THÊM BẤT KỲ NGUYÊN LIỆU NÀO KHÁC.
+NẾU KHÔNG CÓ NGUYÊN LIỆU CHO MÓN TRÁNG MIỆNG/NƯỚC UỐNG → BỎ QUA, KHÔNG TẠO.
+════════════════════════════════════════════════
 
 Các nguyên tắc:
 - Tổng giá <= {budget}, ưu tiên dùng 75-95% ngân sách
@@ -51,7 +56,13 @@ Thông tin bữa ăn:
 - Sở thích / chế độ ăn: {preferences_text}
 - Nguyên liệu có sẵn: {ingredients_text}
 - Lịch sử món đã dùng: {previous_dishes_text}
-- Quy tắc kết hợp: {context_text}
+
+{budget_context}
+
+Quy tắc kết hợp (CHỈ THAM KHẢO, chỉ áp dụng khi có đủ nguyên liệu):
+{context_text}
+
+⚠️  LƯU Ý: Các quy tắc dinh dưỡng ở trên CHỈ LÀ GỢI Ý. Nếu KHÔNG CÓ nguyên liệu phù hợp trong danh sách → BỎ QUA món đó. TUYỆT ĐỐI không được tự thêm nguyên liệu mới.
 
 Trả **JSON** duy nhất:
 {{
@@ -69,13 +80,18 @@ Trả **JSON** duy nhất:
 
 ADJUST_MENU_PROMPT = """Chỉnh sửa menu để tổng giá phù hợp ngân sách {budget} VND.
 
-Chỉ dùng nguyên liệu có sẵn. Không thêm nguyên liệu mới.
+🚨 QUY TẮC TUYỆT ĐỐI:
+═══════════════════════════════════════
+CHỈ DÙNG NGUYÊN LIỆU CÓ SẴN TRONG DANH SÁCH.
+TUYỆT ĐỐI KHÔNG ĐƯỢC TỰ THÊM NGUYÊN LIỆU MỚI.
+═══════════════════════════════════════
 
 Quy tắc:
-- Tổng giá >= 80% và <= {budget}
+- Tổng giá >= 75% và <= {budget}
 - Nếu vượt ngân sách: giảm khẩu phần, bỏ món đắt, điều chỉnh quantity/price
-- Nếu dưới 80%: tăng khẩu phần, thêm món phụ/canh từ nguyên liệu có sẵn, nâng cấp nguyên liệu sẵn có
+- Nếu dưới 75%: tăng khẩu phần, số lượng món hiện có, thêm món phụ/canh CHỈ TỪ nguyên liệu có sẵn
 - Ưu tiên rau củ tươi, món Việt truyền thống
+- KHÔNG tạo món tráng miệng/nước uống nếu không có nguyên liệu phù hợp
 
 Menu hiện tại: {menu}
 Lỗi: {errors_text}

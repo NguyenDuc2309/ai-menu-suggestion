@@ -323,9 +323,25 @@ def validate_budget_node(state: MenuGraphState) -> MenuGraphState:
             total_price += dish_price
         
         budget_tolerance = budget * 1.05
-        min_budget_usage = budget * 0.80
+        min_budget_usage = budget * 0.75
+        iteration_count = state.get("iteration_count", 0)
+        max_iterations = 2
         
-        if total_price > budget_tolerance:
+        # Nếu đã qua 2 lần adjust, chỉ check < budget, bỏ qua yêu cầu 75%
+        if iteration_count >= max_iterations:
+            if total_price <= budget:
+                state["needs_adjustment"] = False
+                state["needs_enhancement"] = False
+                state["budget_error"] = None
+                usage_percent = (total_price / budget) * 100
+                print(f"[STEP] validate_budget: PASS (max iterations reached) - total {total_price:,.0f} VND ({usage_percent:.1f}% budget) < budget")
+            else:
+                state["needs_adjustment"] = True
+                state["needs_enhancement"] = False
+                state["budget_error"] = f"Menu total ({total_price:,.0f} VND) exceeds budget ({budget:,.0f} VND)"
+                print(f"[STEP] validate_budget: FAILED (max iterations) - {state['budget_error']}")
+        # Nếu chưa đến max iterations, áp dụng quy tắc 75%
+        elif total_price > budget_tolerance:
             state["needs_adjustment"] = True
             state["needs_enhancement"] = False
             state["budget_error"] = f"Menu total ({total_price:,.0f} VND) exceeds budget ({budget:,.0f} VND) by {total_price - budget:,.0f} VND"
@@ -334,7 +350,7 @@ def validate_budget_node(state: MenuGraphState) -> MenuGraphState:
             state["needs_adjustment"] = False
             state["needs_enhancement"] = True
             usage_percent = (total_price / budget) * 100
-            state["budget_error"] = f"Menu total ({total_price:,.0f} VND) chỉ dùng {usage_percent:.1f}% budget ({budget:,.0f} VND). Cần tăng lên tối thiểu {min_budget_usage:,.0f} VND (80% budget)"
+            state["budget_error"] = f"Menu total ({total_price:,.0f} VND) chỉ dùng {usage_percent:.1f}% budget ({budget:,.0f} VND). Cần tăng lên tối thiểu {min_budget_usage:,.0f} VND (75% budget)"
             print(f"[STEP] validate_budget: NEEDS ENHANCEMENT - {state['budget_error']}")
         else:
             state["needs_adjustment"] = False
@@ -376,7 +392,7 @@ def adjust_menu_node(state: MenuGraphState) -> MenuGraphState:
         
         if needs_enhancement:
             min_target = budget * 0.80
-            print(f"[STEP] adjust_menu: Iteration {iteration}, enhancing menu to reach minimum {min_target:,.0f} VND (80% of {budget:,.0f} VND)")
+            print(f"[STEP] adjust_menu: Iteration {iteration}, enhancing menu to reach minimum {min_target:,.0f} VND (75% of {budget:,.0f} VND)")
         else:
             print(f"[STEP] adjust_menu: Iteration {iteration}, reducing menu to fit within budget {budget:,.0f} VND")
         

@@ -147,7 +147,7 @@ def format_ingredients_text(ingredients: List[Dict[str, Any]]) -> str:
         base_price = ing['base_price']
         unit = ing.get('unit', 'g')
         ingredients_list.append(
-            f"{idx}. {ing['name']}: {quantity} {unit} tồn kho (Giá mỗi {unit}: {base_price} VND)"
+            f"{idx}. {ing['name']}: Giá {base_price} VND/{unit} (Tồn kho: {quantity} {unit})"
         )
     return f"""=== DANH SÁCH NGUYÊN LIỆU CÓ SẴN (CHỈ ĐƯỢC DÙNG CÁC NGUYÊN LIỆU NÀY) ===
 
@@ -171,9 +171,8 @@ def validate_menu_ingredients(menu: Dict[str, Any], available_ingredients: List[
     
     if invalid_ingredients:
         invalid_list = ", ".join(set(invalid_ingredients))
-        available_list = ", ".join([ing['name'] for ing in available_ingredients])
-        error_msg = f"{context.capitalize()} contains invalid ingredients not in available list: {invalid_list}. Available ingredients: {available_list}"
-        print(f"[LLM] VALIDATION FAILED: {error_msg}")
+        error_msg = "AI returned invalid ingredients not in the available list"
+        print(f"[LLM] VALIDATION FAILED: Invalid ingredients: {invalid_list}")
         raise ValueError(error_msg)
 
 
@@ -440,22 +439,23 @@ Người dùng này gần đây đã được gợi ý các món: {dishes_list}
         ingredients_text = format_ingredients_text(available_ingredients)
         
         if needs_enhancement:
-            min_target = budget * 0.80
+            min_target = budget * 0.75
             max_target = budget * 0.95
             enhancement_note = f"""⚠️  QUAN TRỌNG: MENU HIỆN TẠI DÙNG QUÁ ÍT NGÂN SÁCH
-→ Menu hiện tại chỉ dùng dưới 80% ngân sách ({budget:,.0f} VND)
-→ CẦN TĂNG menu lên để đạt TỐI THIỂU {min_target:,.0f} VND (80% budget)
-→ Target: {min_target:,.0f} - {max_target:,.0f} VND (80-95% budget)
+→ Menu hiện tại chỉ dùng dưới 75% ngân sách ({budget:,.0f} VND)
+→ CẦN TĂNG menu lên để đạt TỐI THIỂU {min_target:,.0f} VND (75% budget)
+→ Target: {min_target:,.0f} - {max_target:,.0f} VND (75-95% budget)
 → KHÔNG được vượt quá {budget:,.0f} VND
 
 CHIẾN LƯỢC TĂNG MENU (theo thứ tự ưu tiên):
 1. Tăng khẩu phần protein/rau trong các món hiện có
 2. Thêm món phụ/canh nếu chưa có đủ
-3. Thêm tráng miệng/đồ uống (sản phẩm đóng gói sẵn 10-25k) nếu còn dư ngân sách
-4. Nâng cấp nguyên liệu (ví dụ: thịt gà → thịt bò nếu budget cho phép)
-5. Thêm món mới đa dạng hơn
+3. Nâng cấp nguyên liệu (ví dụ: thịt gà → thịt bò nếu budget cho phép)
+4. Thêm món mới đa dạng hơn từ nguyên liệu CÓ SẴN
+5. Thêm tráng miệng/đồ uống CHỈ KHI có nguyên liệu phù hợp trong danh sách
 
-LƯU Ý: Tăng chất lượng và số lượng món, KHÔNG chỉ tăng giá đơn thuần."""
+⚠️ LƯU Ý QUAN TRỌNG: Tăng chất lượng và số lượng món, KHÔNG chỉ tăng giá đơn thuần.
+CHỈ DÙNG NGUYÊN LIỆU CÓ TRONG DANH SÁCH. KHÔNG TỰ TẠO THÊM."""
         else:
             enhancement_note = ""
         

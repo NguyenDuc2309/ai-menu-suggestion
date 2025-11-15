@@ -24,8 +24,20 @@ def should_adjust_menu(state: MenuGraphState) -> str:
         print(f"[GRAPH] Routing to adjust_menu ({action}, iteration {iteration_count + 1}/{max_iterations})")
         return "adjust_menu"
     elif (needs_adjustment or needs_enhancement) and iteration_count >= max_iterations:
-        print(f"[GRAPH] Max iterations reached ({max_iterations}), routing to build_response despite budget issue")
-        state["error"] = f"Failed to adjust menu after {max_iterations} attempts"
+        # Kiểm tra xem menu có vượt budget không
+        menu = state.get("generated_menu", {})
+        total_price = menu.get("total_price", 0)
+        intent = state.get("intent", {})
+        budget = intent.get("budget", 0)
+        
+        if total_price > budget:
+            # Nếu vượt budget, đánh dấu lỗi
+            print(f"[GRAPH] Max iterations reached ({max_iterations}), menu still exceeds budget, routing to build_response with error")
+            state["error"] = f"Failed to adjust menu after {max_iterations} attempts: Menu exceeds budget"
+        else:
+            # Nếu < budget, chấp nhận kết quả (không set error)
+            print(f"[GRAPH] Max iterations reached ({max_iterations}), accepting result < budget ({total_price:,.0f}/{budget:,.0f} VND)")
+            state["budget_error"] = None  # Clear error nếu có
         return "build_response"
     else:
         print("[GRAPH] Budget OK, routing to build_response")
