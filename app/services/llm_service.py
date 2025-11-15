@@ -1,4 +1,6 @@
 """LLM service with multi-provider support (Gemini/OpenAI)."""
+import json
+import re
 from typing import List, Dict, Any
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
@@ -7,6 +9,134 @@ from langchain.schema import HumanMessage, SystemMessage
 from google.api_core import exceptions as google_exceptions
 from app.config import config
 from app.prompts import PARSE_INTENT_PROMPT, GENERATE_MENU_PROMPT, ADJUST_MENU_PROMPT
+
+
+def clean_json_string(content: str) -> str:
+    """Clean and fix common JSON errors from LLM responses."""
+    content = content.strip()
+    
+    # Extract JSON object by finding balanced braces first (handles nested objects)
+    start_idx = content.find('{')
+    if start_idx != -1:
+        brace_count = 0
+        end_idx = start_idx
+        for i in range(start_idx, len(content)):
+            char = content[i]
+            if char == '{':
+                brace_count += 1
+            elif char == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    end_idx = i
+                    break
+        if brace_count == 0:
+            content = content[start_idx:end_idx + 1].strip()
+    
+    # Remove markdown code blocks (if still present after extraction)
+    json_match = re.search(r'```(?:json)?\s*(\{.*\})\s*```', content, re.DOTALL)
+    if json_match:
+        # Re-extract with balanced braces
+        extracted = json_match.group(1)
+        start_idx = extracted.find('{')
+        if start_idx != -1:
+            brace_count = 0
+            end_idx = start_idx
+            for i in range(start_idx, len(extracted)):
+                if extracted[i] == '{':
+                    brace_count += 1
+                elif extracted[i] == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        end_idx = i
+                        break
+            if brace_count == 0:
+                content = extracted[start_idx:end_idx + 1].strip()
+    
+    # Fix common JSON issues
+    # 1. Remove trailing commas before } or ]
+    content = re.sub(r',(\s*[}\]])', r'\1', content)
+    
+    # 2. Remove comments (// or /* */)
+    content = re.sub(r'//.*?$', '', content, flags=re.MULTILINE)
+    content = re.sub(r'/\*.*?\*/', '', content, flags=re.DOTALL)
+    
+    # 3. Fix single quotes to double quotes for simple string values (conservative)
+    # Only fix simple cases like 'value' not complex nested strings
+    content = re.sub(r":\s*'([^']*)'(\s*[,}\]])", r': "\1"\2', content)
+    
+    return content
+
+
+def parse_json_with_fallback(content: str, context: str = "") -> Dict[str, Any]:
+    """Parse JSON with multiple fallback strategies."""
+    original_content = content
+    
+    # Strategy 1: Try direct parse
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        pass
+    
+    # Strategy 2: Clean and try again
+    try:
+        cleaned = clean_json_string(content)
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+    
+    # Strategy 3: Try to extract JSON object more aggressively
+    try:
+        # Find the largest JSON object
+        start_idx = content.find('{')
+        if start_idx != -1:
+            # Try to find matching closing brace
+            brace_count = 0
+            end_idx = start_idx
+            for i in range(start_idx, len(content)):
+                char = content[i]
+                if char == '{':
+                    brace_count += 1
+                elif char == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        end_idx = i
+                        break
+            
+            if brace_count == 0:
+                extracted = content[start_idx:end_idx + 1]
+                cleaned = clean_json_string(extracted)
+                return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+    
+    # Strategy 4: Log detailed error info
+    error_msg = f"Failed to parse JSON{': ' + context if context else ''}"
+    print(f"[LLM] {error_msg}")
+    print(f"[LLM] Original content length: {len(original_content)}")
+    
+    # Try to find the error position and show context
+    try:
+        json.loads(original_content)
+    except json.JSONDecodeError as e:
+        print(f"[LLM] JSON error: {e}")
+        if hasattr(e, 'pos') and e.pos is not None:
+            error_start = max(0, e.pos - 150)
+            error_end = min(len(original_content), e.pos + 150)
+            error_context = original_content[error_start:error_end]
+            
+            # Show line number
+            line_num = original_content[:e.pos].count('\n') + 1
+            col_num = e.pos - original_content.rfind('\n', 0, e.pos) - 1
+            
+            print(f"[LLM] Error at line {line_num}, column {col_num} (position {e.pos}):")
+            print(f"[LLM] ...{error_context}...")
+            print(f"[LLM] {' ' * (len('...') + min(150, e.pos - error_start))}^")
+        else:
+            print(f"[LLM] Original content (first 1000 chars): {original_content[:1000]}")
+    except Exception:
+        print(f"[LLM] Original content (first 1000 chars): {original_content[:1000]}")
+    
+    raise ValueError(f"{error_msg}. Invalid JSON response from LLM.")
 
 
 class LLMService:
@@ -33,7 +163,7 @@ class LLMService:
                 raise ValueError("Missing OPENAI_API_KEY (required when LLM_PROVIDER=openai)")
             
             self.llm = ChatOpenAI(
-                model="gpt-4.1",  
+                model="gpt-4o-mini",  
                 temperature=0.8,  
                 openai_api_key=config.OPENAI_API_KEY,
                 max_retries=0 
@@ -51,41 +181,13 @@ class LLMService:
         try:
             response = self.llm.invoke(prompt.format_messages())
             
-            import json
-            import re
+            if not hasattr(response, 'content') or response.content is None:
+                raise ValueError("LLM response has no content attribute or content is None")
             
             content = response.content.strip()
             print(f"[LLM] parse_intent response (first 500 chars): {content[:500]}")
             
-            json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', content, re.DOTALL)
-            if json_match:
-                content = json_match.group(1).strip()
-                print(f"[LLM] Extracted JSON from markdown: {content[:200]}...")
-            else:
-                start_idx = content.find('{')
-                if start_idx != -1:
-                    brace_count = 0
-                    end_idx = start_idx
-                    for i in range(start_idx, len(content)):
-                        if content[i] == '{':
-                            brace_count += 1
-                        elif content[i] == '}':
-                            brace_count -= 1
-                            if brace_count == 0:
-                                end_idx = i
-                                break
-                    if brace_count == 0:
-                        content = content[start_idx:end_idx + 1].strip()
-                        print(f"[LLM] Extracted JSON from text (balanced braces): {content[:200]}...")
-                    else:
-                        print(f"[LLM] Unbalanced braces, trying to parse entire content")
-                else:
-                    print("[LLM] No '{' found, trying to parse entire content")
-            
-            if not content or not content.strip().startswith('{'):
-                raise ValueError(f"Response does not contain valid JSON. Content: {content[:200]}")
-            
-            intent = json.loads(content)
+            intent = parse_json_with_fallback(content, "parse_intent")
             
             if not isinstance(intent, dict):
                 raise ValueError(f"Parsed JSON is not a dictionary: {type(intent)}")
@@ -182,10 +284,6 @@ Người dùng này gần đây đã được gợi ý các món: {dishes_list}
             print("[LLM] generate_menu: Invoking LLM...")
             response = self.llm.invoke(prompt.format_messages())
             
-            import json
-            import re
-            
-            # Get response content
             if not hasattr(response, 'content') or response.content is None:
                 raise ValueError("LLM response has no content attribute or content is None")
             
@@ -193,35 +291,7 @@ Người dùng này gần đây đã được gợi ý các món: {dishes_list}
             print(f"[LLM] generate_menu response (first 500 chars): {content[:500]}")
             print(f"[LLM] generate_menu response length: {len(content)}")
             
-            json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', content, re.DOTALL)
-            if json_match:
-                content = json_match.group(1).strip()
-                print(f"[LLM] Extracted JSON from markdown: {content[:200]}...")
-            else:
-                start_idx = content.find('{')
-                if start_idx != -1:
-                    brace_count = 0
-                    end_idx = start_idx
-                    for i in range(start_idx, len(content)):
-                        if content[i] == '{':
-                            brace_count += 1
-                        elif content[i] == '}':
-                            brace_count -= 1
-                            if brace_count == 0:
-                                end_idx = i
-                                break
-                    if brace_count == 0:
-                        content = content[start_idx:end_idx + 1].strip()
-                        print(f"[LLM] Extracted JSON from text (balanced braces): {content[:200]}...")
-                    else:
-                        print(f"[LLM] Unbalanced braces, trying to parse entire content")
-                else:
-                    print("[LLM] No '{' found, trying to parse entire content")
-            
-            if not content or not content.strip().startswith('{'):
-                raise ValueError(f"Response does not contain valid JSON. Content: {content[:200]}")
-            
-            menu = json.loads(content)
+            menu = parse_json_with_fallback(content, "generate_menu")
             
             if not isinstance(menu, dict):
                 raise ValueError(f"Parsed JSON is not a dictionary: {type(menu)}")
@@ -317,41 +387,13 @@ LƯU Ý: Tăng chất lượng và số lượng món, KHÔNG chỉ tăng giá �
         try:
             response = self.llm.invoke(prompt.format_messages())
             
-            import json
-            import re
+            if not hasattr(response, 'content') or response.content is None:
+                raise ValueError("LLM response has no content attribute or content is None")
             
             content = response.content.strip()
             print(f"[LLM] adjust_menu response (first 500 chars): {content[:500]}")
             
-            json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', content, re.DOTALL)
-            if json_match:
-                content = json_match.group(1).strip()
-                print(f"[LLM] Extracted JSON from markdown: {content[:200]}...")
-            else:
-                start_idx = content.find('{')
-                if start_idx != -1:
-                    brace_count = 0
-                    end_idx = start_idx
-                    for i in range(start_idx, len(content)):
-                        if content[i] == '{':
-                            brace_count += 1
-                        elif content[i] == '}':
-                            brace_count -= 1
-                            if brace_count == 0:
-                                end_idx = i
-                                break
-                    if brace_count == 0:
-                        content = content[start_idx:end_idx + 1].strip()
-                        print(f"[LLM] Extracted JSON from text (balanced braces): {content[:200]}...")
-                    else:
-                        print(f"[LLM] Unbalanced braces, trying to parse entire content")
-                else:
-                    print("[LLM] No '{' found, trying to parse entire content")
-            
-            if not content or not content.strip().startswith('{'):
-                raise ValueError(f"Response does not contain valid JSON. Content: {content[:200]}")
-            
-            adjusted_menu = json.loads(content)
+            adjusted_menu = parse_json_with_fallback(content, "adjust_menu")
             
             if not isinstance(adjusted_menu, dict):
                 raise ValueError(f"Parsed JSON is not a dictionary: {type(adjusted_menu)}")
