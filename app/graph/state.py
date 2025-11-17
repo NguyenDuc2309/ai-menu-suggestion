@@ -1,9 +1,9 @@
-"""LangGraph State definition."""
+"""LangGraph State definition - RAG v2 Pipeline."""
 from typing import TypedDict, List, Dict, Any, Optional
 
 
 class MenuGraphState(TypedDict):
-    """State for the menu suggestion workflow."""
+    """State for the RAG v2 menu suggestion workflow."""
     
     # User input
     user_input: str
@@ -15,16 +15,25 @@ class MenuGraphState(TypedDict):
     previous_dishes: List[str]
     
     # Parsed intent
-    intent: Dict[str, Any]  # {cuisine, budget, preferences}
+    intent: Dict[str, Any]  # {budget, meal_type, num_people, preferences}
     
-    # Available ingredients from database (mock)
-    available_ingredients: List[Dict[str, Any]]  # [{name, quantity, price, unit}]
+    # RAG v2: Recipes retrieved from Vector DB (món ăn + nguyên liệu)
+    rag_recipes: List[str]  # Recipe documents from Pinecone
     
-    # Ingredient combination rules retrieved from Pinecone
+    # RAG v2: Parsed products với ID làm định danh (no duplicates, no gia vị/gạo/mì)
+    available_products: Dict[str, Dict[str, Any]]  # {prod_id: {"id": "...", "name": "...", "price": ...}}
+    
+    # DEPRECATED: Available ingredients (kept for backward compatibility)
+    available_ingredients: List[Dict[str, Any]]
+    
+    # DEPRECATED: Combination rules (kept for backward compatibility)
     combination_rules: List[str]
     
     # Generated menu
     generated_menu: Dict[str, Any]  # {items: [...], total_price: float}
+    
+    # Out of stock ingredients (from Step D: fetch_realtime_pricing)
+    out_of_stock_ingredients: List[str]
     
     # Final response
     final_response: Optional[Dict[str, Any]]

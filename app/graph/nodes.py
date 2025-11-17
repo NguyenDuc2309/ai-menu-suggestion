@@ -51,7 +51,7 @@ def detect_meal_type_from_input(user_input: str) -> tuple[str, bool]:
     
     return (None, False)
 
-
+# Step 1: Parse intent
 def parse_intent_node(state: MenuGraphState) -> MenuGraphState:
     """Parse user input to extract intent. Always sets complete intent with fallback logic."""
     print("[STEP] parse_intent: Starting...")
@@ -121,103 +121,18 @@ def parse_intent_node(state: MenuGraphState) -> MenuGraphState:
     return state
 
 
-def query_ingredients_node(state: MenuGraphState) -> MenuGraphState:
-    """Query ingredients using SQL generated from intent.
+# Step 2: Retrieve recipes from RAG (RAG v2 Pipeline)
+def retrieve_recipes_from_rag_node(state: MenuGraphState) -> MenuGraphState:
+    """Query RAG to retrieve recipes with ingredients (RAG v2).
     
-    Query tool will:
-    - Generate SQL from intent using LLM
-    - Filter mockup data (or execute on real DB later)
-    - Return filtered ingredients
+    RAG returns:
+    - Món ăn hoàn chỉnh với nguyên liệu
+    - Combination rules
+    - Domain knowledge
     """
-    print("[STEP] query_ingredients: Starting...")
+    print("[STEP] retrieve_recipes_from_rag: Starting...")
     if state.get("error"):
-        print("[STEP] query_ingredients: Error detected in state, skipping")
-        return state
-    
-    try:
-        intent = state.get("intent", {})
-        preferences = intent.get("preferences", []) or []
-        query_tool = get_query_tool()
-        ingredients = query_tool.query_ingredients(intent)
-        
-        if not ingredients:
-            # CRITICAL: Không có nguyên liệu → DỪNG pipeline
-            if preferences:
-                pref_text = ", ".join(preferences)
-                error_msg = f"Không có nguyên liệu phù hợp với yêu cầu: {pref_text}"
-            else:
-                error_msg = "Không có nguyên liệu phù hợp với điều kiện lọc"
-            print(f"[STEP] query_ingredients: FAILED - {error_msg}")
-            state["error"] = error_msg
-            state["available_ingredients"] = []
-            return state
-        
-        state["available_ingredients"] = ingredients
-        print(f"[STEP] query_ingredients: Success - retrieved {len(ingredients)} filtered ingredients")
-        
-    except Exception as e:
-        error_msg = f"Error querying ingredients: {str(e)}"
-        print(f"[STEP] query_ingredients: FAILED - {error_msg}")
-        state["error"] = error_msg
-        state["available_ingredients"] = []
-    
-    return state
-
-
-def prefilter_ingredients_by_budget_node(state: MenuGraphState) -> MenuGraphState:
-    """Post-process filtered ingredients: prioritize fresh, limit count, shuffle."""
-    print("[STEP] prefilter_ingredients: Starting...")
-    if state.get("error"):
-        print("[STEP] prefilter_ingredients: Error detected in state, skipping")
-        return state
-    
-    try:
-        all_ingredients = state.get("available_ingredients", [])
-        
-        # Separate fresh vs other
-        fresh_ingredients = []
-        other_ingredients = []
-        
-        for ing in all_ingredients:
-            category = ing.get("category", "").lower()
-            if category == "tươi" or category == "chay":
-                fresh_ingredients.append(ing)
-            else:
-                other_ingredients.append(ing)
-        
-        # Sort by price
-        fresh_ingredients.sort(key=lambda x: x.get("base_price", 0))
-        other_ingredients.sort(key=lambda x: x.get("base_price", 0))
-        
-        # Prioritize fresh (40 fresh + 10 other max)
-        filtered = fresh_ingredients[:40] + other_ingredients[:10]
-        
-        # Remove duplicates
-        seen = set()
-        unique_filtered = []
-        for ing in filtered:
-            if ing["name"] not in seen:
-                seen.add(ing["name"])
-                unique_filtered.append(ing)
-        
-        # Shuffle for diversity
-        random.shuffle(unique_filtered)
-        
-        state["available_ingredients"] = unique_filtered
-        print(f"[STEP] prefilter_ingredients: Success - {len(unique_filtered)} ingredients ({len([i for i in unique_filtered if i.get('category','').lower() in ['tươi','chay']])} fresh)")
-        
-    except Exception as e:
-        error_msg = f"Error prefiltering ingredients: {str(e)}"
-        print(f"[STEP] prefilter_ingredients: FAILED - {error_msg}")
-        state["error"] = error_msg
-    return state
-
-
-def retrieve_rules_and_generate_menu_node(state: MenuGraphState) -> MenuGraphState:
-    """Retrieve ingredient combination rules from Pinecone and generate menu."""
-    print("[STEP] retrieve_rules_and_generate_menu: Starting...")
-    if state.get("error"):
-        print("[STEP] retrieve_rules_and_generate_menu: Error detected in state, skipping")
+        print("[STEP] retrieve_recipes_from_rag: Error detected in state, skipping")
         return state
     
     try:
@@ -230,32 +145,93 @@ def retrieve_rules_and_generate_menu_node(state: MenuGraphState) -> MenuGraphSta
         if not budget or not meal_type:
             raise ValueError("Missing budget or meal_type in intent")
         
-        ingredients = state.get("available_ingredients", [])
-        ingredient_names = [ing["name"] for ing in ingredients]
-        
-        print(f"[STEP] retrieve_rules_and_generate_menu: Querying Pinecone for combination rules (meal_type: {meal_type})...")
+        print(f"[STEP] retrieve_recipes_from_rag: Querying RAG for recipes (meal_type: {meal_type}, preferences: {preferences})...")
         vector_store = get_vector_store_service()
-        combination_rules = vector_store.query_combination_rules(
+        recipes = vector_store.query_recipes(
             meal_type=meal_type,
-            ingredients=ingredient_names,
-            top_k=5
+            preferences=preferences,
+            budget=budget,
+            num_people=num_people,
+            top_k=10
         )
-        state["combination_rules"] = combination_rules
-        print(f"[STEP] retrieve_rules_and_generate_menu: Pinecone returned {len(combination_rules)} combination rules")
         
-        print(f"[STEP] retrieve_rules_and_generate_menu: Generating menu with LLM using combination rules...")
+        if not recipes:
+            error_msg = "Không tìm thấy món ăn phù hợp trong RAG"
+            print(f"[STEP] retrieve_recipes_from_rag: FAILED - {error_msg}")
+            state["error"] = error_msg
+            state["rag_recipes"] = []
+            return state
+        
+        state["rag_recipes"] = recipes
+        print(f"[STEP] retrieve_recipes_from_rag: Success - retrieved {len(recipes)} results from RAG")
+        
+        # LOG CHI TIẾT RAG RECIPES
+        print("\n" + "="*100)
+        print("🔥 RAG RESULTS DETAILS:")
+        print("="*100)
+        for idx, recipe in enumerate(recipes, 1):
+            print(f"\n--- RESULT {idx} ---")
+            print(recipe)
+            print("-" * 80)
+        print("="*100 + "\n")
+        
+    except Exception as e:
+        error_msg = str(e)
+        error_str = error_msg.lower()
+        print(f"[STEP] retrieve_recipes_from_rag: FAILED - Exception type: {type(e).__name__}, Message: {error_msg}")
+        import traceback
+        print(f"[STEP] retrieve_recipes_from_rag: Traceback: {traceback.format_exc()}")
+        
+        if "quota" in error_str or "429" in error_str or "resourceexhausted" in error_str:
+            raise ValueError(f"API quota exceeded: {error_msg}")
+        if "api key" in error_str or "api_key" in error_str or "unauthorized" in error_str or "401" in error_str:
+            raise ValueError(f"API key error: {error_msg}")
+        
+        state["error"] = f"Error querying RAG: {error_msg}"
+        state["rag_recipes"] = []
+    
+    return state
+
+
+# Step 3: Generate menu from RAG recipes (RAG v2 Pipeline)
+def generate_menu_from_rag_recipes_node(state: MenuGraphState) -> MenuGraphState:
+    """Generate menu by selecting and formatting recipes from RAG.
+    
+    LLM task: Select best recipes from RAG, format to JSON.
+    RAG already has: món ăn + nguyên liệu + combination rules.
+    """
+    print("[STEP] generate_menu_from_rag: Starting...")
+    if state.get("error"):
+        print("[STEP] generate_menu_from_rag: Error detected in state, skipping")
+        return state
+    
+    try:
+        intent = state.get("intent", {})
+        budget = intent.get("budget")
+        meal_type = intent.get("meal_type")
+        num_people = intent.get("num_people", 1)
+        preferences = intent.get("preferences", [])
+        
+        if not budget or not meal_type:
+            raise ValueError("Missing budget or meal_type in intent")
+        
+        rag_recipes = state.get("rag_recipes", [])
+        if not rag_recipes:
+            raise ValueError("No RAG recipes available")
+        
+        print(f"[STEP] generate_menu_from_rag: Generating menu from {len(rag_recipes)} RAG recipes...")
         llm_service = get_llm_service()
         
         previous_dishes = state.get("previous_dishes", [])
         if previous_dishes:
-            print(f"[STEP] retrieve_rules_and_generate_menu: User has {len(previous_dishes)} previous dishes, will avoid repeating them")
+            print(f"[STEP] generate_menu_from_rag: User has {len(previous_dishes)} previous dishes, will avoid repeating them")
         
         budget_specified = intent.get("budget_specified", True)
-        print(f"[STEP] retrieve_rules_and_generate_menu: Budget specified by user: {budget_specified}")
+        print(f"[STEP] generate_menu_from_rag: Budget specified by user: {budget_specified}")
         
-        menu = llm_service.generate_menu(
-            ingredients=ingredients,
-            context=combination_rules,
+        # Generate menu from RAG recipes
+        menu = llm_service.generate_menu_from_rag(
+            rag_recipes=rag_recipes,
             meal_type=meal_type,
             num_people=num_people,
             budget=budget,
@@ -266,30 +242,136 @@ def retrieve_rules_and_generate_menu_node(state: MenuGraphState) -> MenuGraphSta
         state["generated_menu"] = menu
         
         menu_items_count = len(menu.get("items", []))
-        print(f"[STEP] retrieve_rules_and_generate_menu: Success - generated {menu_items_count} menu items")
+        print(f"[STEP] generate_menu_from_rag: Success - generated {menu_items_count} menu items")
         
     except Exception as e:
         error_msg = str(e)
         error_str = error_msg.lower()
-        print(f"[STEP] retrieve_rules_and_generate_menu: FAILED - Exception type: {type(e).__name__}, Message: {error_msg}")
+        print(f"[STEP] generate_menu_from_rag: FAILED - Exception type: {type(e).__name__}, Message: {error_msg}")
         import traceback
-        print(f"[STEP] retrieve_rules_and_generate_menu: Traceback: {traceback.format_exc()}")
+        print(f"[STEP] generate_menu_from_rag: Traceback: {traceback.format_exc()}")
         
         if "quota" in error_str or "429" in error_str or "resourceexhausted" in error_str:
-            print("[STEP] retrieve_rules_and_generate_menu: Critical error detected, raising exception to stop workflow")
+            print("[STEP] generate_menu_from_rag: Critical error detected, raising exception to stop workflow")
             raise ValueError(f"API quota exceeded: {error_msg}")
         if "api key" in error_str or "api_key" in error_str or "unauthorized" in error_str or "401" in error_str:
-            print("[STEP] retrieve_rules_and_generate_menu: Critical error detected, raising exception to stop workflow")
+            print("[STEP] generate_menu_from_rag: Critical error detected, raising exception to stop workflow")
             raise ValueError(f"API key error: {error_msg}")
         if "Failed to generate" in error_str or "invalid json" in error_str or "jsondecodeerror" in error_str or "missing required key" in error_str or "keyerror" in error_str:
-            print("[STEP] retrieve_rules_and_generate_menu: Critical error detected (JSON parsing/structure failed), raising exception to stop workflow")
+            print("[STEP] generate_menu_from_rag: Critical error detected (JSON parsing/structure failed), raising exception to stop workflow")
             raise ValueError(f"Failed to generate: LLM returned invalid response. {error_msg}")
         state["error"] = f"Error generating menu: {error_msg}"
-        state["combination_rules"] = []
         state["generated_menu"] = {"items": [], "total_price": 0}
     return state
 
+# Step 4: Fetch realtime ingredient pricing (Step C in RAG v2)
+def fetch_realtime_pricing_node(state: MenuGraphState) -> MenuGraphState:
+    """Fetch realtime pricing from mockupData.json and update menu prices.
+    
+    Step C: Lấy giá thực tế từ DB/API và cập nhật menu.
+    """
+    print("[STEP] fetch_realtime_pricing: Starting...")
+    if state.get("error"):
+        print("[STEP] fetch_realtime_pricing: Error detected in state, skipping")
+        return state
+    
+    try:
+        menu = state.get("generated_menu", {})
+        if not menu or not menu.get("items"):
+            print("[STEP] fetch_realtime_pricing: No menu items to price")
+            return state
+        
+        # Load realtime prices from mockupData
+        query_tool = get_query_tool()
+        all_products = query_tool._load_mockup_data()
+        
+        # Create price map
+        price_map = {}
+        for product in all_products:
+            name_lower = product.get("name", "").lower()
+            price_map[name_lower] = {
+                "base_price": product.get("base_price", 0),
+                "quantity": product.get("quantity", 0),
+                "unit": product.get("unit", "g")
+            }
+        
+        print(f"[STEP] fetch_realtime_pricing: Loaded {len(price_map)} products for pricing")
+        
+        # Update menu with realtime prices
+        updated_items = []
+        total_price = 0
+        out_of_stock = []
+        
+        for item in menu.get("items", []):
+            dish_price = 0
+            updated_ingredients = []
+            
+            for ing in item.get("ingredients", []):
+                ing_name = ing.get("name", "")
+                ing_name_lower = ing_name.lower()
+                ing_quantity = ing.get("quantity", 0)
+                ing_unit = ing.get("unit", "g")
+                
+                if ing_name_lower in price_map:
+                    product_info = price_map[ing_name_lower]
+                    base_price = product_info["base_price"]
+                    stock_quantity = product_info["quantity"]
+                    
+                    # Check stock
+                    if stock_quantity < ing_quantity:
+                        out_of_stock.append(ing_name)
+                        print(f"[STEP] fetch_realtime_pricing: {ing_name} out of stock (need {ing_quantity}, have {stock_quantity})")
+                    
+                    # Calculate realtime price
+                    realtime_price = base_price * ing_quantity
+                    dish_price += realtime_price
+                    
+                    updated_ingredients.append({
+                        "name": ing_name,
+                        "quantity": ing_quantity,
+                        "unit": ing_unit,
+                        "price": realtime_price
+                    })
+                else:
+                    # Ingredient not found in mockupData
+                    out_of_stock.append(ing_name)
+                    print(f"[STEP] fetch_realtime_pricing: {ing_name} not found in mockupData")
+                    # Keep original price as fallback
+                    updated_ingredients.append(ing)
+                    dish_price += ing.get("price", 0)
+            
+            updated_items.append({
+                "name": item.get("name", ""),
+                "ingredients": updated_ingredients,
+                "price": dish_price
+            })
+            total_price += dish_price
+        
+        updated_menu = {
+            "items": updated_items,
+            "total_price": total_price
+        }
+        
+        state["generated_menu"] = updated_menu
+        state["out_of_stock_ingredients"] = out_of_stock
+        
+        if out_of_stock:
+            print(f"[STEP] fetch_realtime_pricing: Warning - {len(out_of_stock)} ingredients out of stock or not found")
+        
+        print(f"[STEP] fetch_realtime_pricing: Success - updated menu with realtime prices, total: {total_price:,.0f} VND")
+        
+    except Exception as e:
+        error_msg = f"Error fetching realtime pricing: {str(e)}"
+        print(f"[STEP] fetch_realtime_pricing: FAILED - {error_msg}")
+        import traceback
+        print(f"[STEP] fetch_realtime_pricing: Traceback: {traceback.format_exc()}")
+        # Don't set error, use fallback prices
+        print("[STEP] fetch_realtime_pricing: Using fallback prices from RAG")
+    
+    return state
 
+
+# Step 5: Validate budget
 def validate_budget_node(state: MenuGraphState) -> MenuGraphState:
     """Validate that generated menu is within budget."""
     print("[STEP] validate_budget: Starting...")
@@ -369,8 +451,12 @@ def validate_budget_node(state: MenuGraphState) -> MenuGraphState:
     return state
 
 
+# Step 6: Adjust menu (Step D in RAG v2)
 def adjust_menu_node(state: MenuGraphState) -> MenuGraphState:
-    """Adjust menu to fit within budget or enhance to meet minimum usage using LLM."""
+    """Adjust menu to fit within budget (Step D).
+    
+    Uses RAG recipes to replace or adjust dishes.
+    """
     print("[STEP] adjust_menu: Starting...")
     if state.get("error"):
         print("[STEP] adjust_menu: Error detected in state, skipping")
@@ -380,9 +466,10 @@ def adjust_menu_node(state: MenuGraphState) -> MenuGraphState:
         intent = state.get("intent", {})
         budget = intent.get("budget")
         menu = state.get("generated_menu", {})
-        available_ingredients = state.get("available_ingredients", [])
+        rag_recipes = state.get("rag_recipes", [])
         budget_error = state.get("budget_error", "Menu needs adjustment")
         needs_enhancement = state.get("needs_enhancement", False)
+        out_of_stock = state.get("out_of_stock_ingredients", [])
         
         if not budget:
             raise ValueError("Missing budget in intent")
@@ -391,24 +478,46 @@ def adjust_menu_node(state: MenuGraphState) -> MenuGraphState:
         iteration = state["iteration_count"]
         
         if needs_enhancement:
-            min_target = budget * 0.80
+            min_target = budget * 0.75
             print(f"[STEP] adjust_menu: Iteration {iteration}, enhancing menu to reach minimum {min_target:,.0f} VND (75% of {budget:,.0f} VND)")
         else:
             print(f"[STEP] adjust_menu: Iteration {iteration}, reducing menu to fit within budget {budget:,.0f} VND")
         
         llm_service = get_llm_service()
-        adjusted_menu = llm_service.adjust_menu(
+        adjusted_menu = llm_service.adjust_menu_from_rag(
             menu=menu,
+            rag_recipes=rag_recipes,
             validation_errors=[budget_error],
-            available_ingredients=available_ingredients,
+            out_of_stock=out_of_stock,
             budget=budget,
             needs_enhancement=needs_enhancement
         )
         
         state["generated_menu"] = adjusted_menu
         
+        # Re-fetch realtime pricing after adjustment
+        query_tool = get_query_tool()
+        all_products = query_tool._load_mockup_data()
+        price_map = {p.get("name", "").lower(): p for p in all_products}
+        
+        total_price = 0
+        for item in adjusted_menu.get("items", []):
+            dish_price = 0
+            for ing in item.get("ingredients", []):
+                ing_name_lower = ing.get("name", "").lower()
+                if ing_name_lower in price_map:
+                    base_price = price_map[ing_name_lower].get("base_price", 0)
+                    quantity = ing.get("quantity", 0)
+                    dish_price += base_price * quantity
+                else:
+                    dish_price += ing.get("price", 0)
+            total_price += dish_price
+        
+        adjusted_menu["total_price"] = total_price
+        state["generated_menu"] = adjusted_menu
+        
         menu_items_count = len(adjusted_menu.get("items", []))
-        print(f"[STEP] adjust_menu: Success - adjusted menu has {menu_items_count} items")
+        print(f"[STEP] adjust_menu: Success - adjusted menu has {menu_items_count} items, new total: {total_price:,.0f} VND")
         
     except Exception as e:
         error_msg = f"Error adjusting menu: {str(e)}"
@@ -417,6 +526,7 @@ def adjust_menu_node(state: MenuGraphState) -> MenuGraphState:
     return state
 
 
+# Step 7: Build response (Step E in RAG v2)
 def build_response_node(state: MenuGraphState) -> MenuGraphState:
     """Build final response."""
     print("[STEP] build_response: Starting...")

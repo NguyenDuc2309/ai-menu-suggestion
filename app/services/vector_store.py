@@ -29,6 +29,56 @@ class VectorStoreService:
             embedding=self.embeddings
         )
     
+    def query_recipes(
+        self,
+        meal_type: str,
+        preferences: List[str],
+        budget: int,
+        num_people: int,
+        top_k: int = 10
+    ) -> List[str]:
+        """
+        Query Pinecone to retrieve recipes/món ăn with ingredients from RAG.
+        
+        RAG v2: Vector DB chứa recipes hoàn chỉnh với:
+        - Tên món ăn
+        - Nguyên liệu chi tiết (name, quantity, unit)
+        - Combination rules
+        - Domain knowledge
+        
+        Args:
+            meal_type: Type of meal (e.g., "sáng", "trưa", "tối")
+            preferences: User preferences (e.g., ["gà", "trứng"])
+            budget: Budget in VND
+            num_people: Number of people
+            top_k: Number of recipes to retrieve
+            
+        Returns:
+            List of recipe documents as strings
+        """
+        # Build query for RAG
+        query_text = f"Món ăn Việt Nam cho bữa {meal_type}, {num_people} người, ngân sách {budget} VND"
+        
+        if preferences:
+            preferences_text = ", ".join(preferences)
+            query_text += f", sở thích: {preferences_text}"
+        
+        try:
+            print(f"[RAG] Querying recipes: {query_text}")
+            results = self.vector_store.similarity_search(
+                query_text,
+                k=top_k
+            )
+            
+            recipe_docs = [doc.page_content for doc in results]
+            print(f"[RAG] Retrieved {len(recipe_docs)} recipes from vector DB")
+            return recipe_docs
+        
+        except Exception as e:
+            error_msg = f"Error querying Pinecone for recipes: {str(e)}"
+            print(error_msg)
+            raise ValueError(error_msg)
+    
     def query_combination_rules(
         self,
         meal_type: str,
@@ -36,34 +86,11 @@ class VectorStoreService:
         top_k: int = 5
     ) -> List[str]:
         """
-        Query Pinecone to retrieve ingredient combination rules.
-        
-        Args:
-            meal_type: Type of meal (e.g., "sáng", "trưa", "tối")
-            ingredients: List of available ingredients
-            top_k: Number of rule documents to retrieve
-            
-        Returns:
-            List of combination rule documents as strings
+        DEPRECATED: Use query_recipes() instead.
+        Kept for backward compatibility only.
         """
-        query_text = f"Quy tắc kết hợp nguyên liệu món ăn Việt Nam bữa {meal_type}"
-        if ingredients:
-            ingredients_text = ", ".join(ingredients[:5])  
-            query_text += f" với nguyên liệu: {ingredients_text}"
-        
-        try:
-            results = self.vector_store.similarity_search(
-                query_text,
-                k=top_k
-            )
-            
-            rule_docs = [doc.page_content for doc in results]
-            return rule_docs
-        
-        except Exception as e:
-            error_msg = f"Error querying Pinecone for combination rules: {str(e)}"
-            print(error_msg)
-            raise ValueError(error_msg)
+        print("[DEPRECATED] query_combination_rules is deprecated, use query_recipes instead")
+        return self.query_recipes(meal_type, ingredients, 0, 1, top_k)
     
     def query_knowledge(
         self,

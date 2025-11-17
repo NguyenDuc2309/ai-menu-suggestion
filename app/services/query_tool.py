@@ -133,49 +133,81 @@ class QueryTool:
         self._cached_mockup_data = None
     
     def _load_mockup_data(self) -> List[Dict[str, Any]]:
-        """Load mockup ingredient data from JSON file."""
+        """Load mockup ingredient data from JSON file and transform to expected format."""
         if self._cached_mockup_data is not None:
             return self._cached_mockup_data
         
         if self._mockup_data_path is None:
             current_dir = os.path.dirname(os.path.abspath(__file__))
             self._mockup_data_path = os.path.join(
-                current_dir, "..", "data", "mock_ingredients.json"
+                current_dir, "..", "data", "mockupData.json"
             )
         
         try:
             with open(self._mockup_data_path, "r", encoding="utf-8") as f:
-                mockup_data = json.load(f)
-            self._cached_mockup_data = mockup_data
-            print(f"[TOOL] Loaded {len(mockup_data)} ingredients")
-            return mockup_data
+                raw_data = json.load(f)
+            
+            # Transform data structure from mockupData.json format to expected format
+            transformed_data = []
+            for item in raw_data:
+                # Infer category from name (basic categorization)
+                name_lower = item.get("name", "").lower()
+                category = "tươi"  # default
+                
+                if any(x in name_lower for x in ["gà", "thịt", "cá", "tôm", "mực", "ngao"]):
+                    category = "tươi"
+                elif any(x in name_lower for x in ["rau", "cải", "xà lách", "cà chua", "dưa leo", "cà rốt", "khoai", "hành", "ngò", "ớt"]):
+                    category = "tươi"
+                elif any(x in name_lower for x in ["chuối", "cam", "táo", "dưa hấu", "nho", "bơ"]):
+                    category = "tươi"
+                elif any(x in name_lower for x in ["gạo", "bún", "phở", "mì", "bánh mì"]):
+                    category = "tươi"
+                elif any(x in name_lower for x in ["đường", "muối", "dầu", "nước mắm", "nước tương", "hạt nêm", "tiêu"]):
+                    category = "gia vị"
+                elif any(x in name_lower for x in ["sữa", "sữa chua", "bơ thực vật"]):
+                    category = "tươi"
+                
+                # Infer unit from name
+                unit = "g"  # default
+                if "1kg" in name_lower or "kg" in name_lower:
+                    unit = "kg"
+                elif "1L" in name_lower or "L" in name_lower or "ml" in name_lower:
+                    unit = "L" if "L" in name_lower else "ml"
+                elif "vỉ" in name_lower or "lốc" in name_lower or "ổ" in name_lower:
+                    unit = "cái"
+                
+                # Transform to expected format
+                transformed_item = {
+                    "id": item.get("id", ""),
+                    "name": item.get("name", ""),
+                    "base_price": item.get("salePrice", item.get("price", 0)),  # Use salePrice if available, else price
+                    "quantity": item.get("quantity", 0),
+                    "unit": unit,
+                    "category": category
+                }
+                transformed_data.append(transformed_item)
+            
+            self._cached_mockup_data = transformed_data
+            print(f"[TOOL] Loaded {len(transformed_data)} ingredients from mockupData.json")
+            return transformed_data
         except FileNotFoundError:
             raise ValueError(f"Mock ingredients file not found: {self._mockup_data_path}")
         except json.JSONDecodeError as e:
             raise ValueError(f"Error parsing mockup JSON file: {str(e)}")
     
     def _generate_sql_from_intent(self, intent: Dict[str, Any]) -> str:
-        """Generate SQL WHERE clause from intent using LLM."""
-        from app.services.llm_service import get_llm_service
+        """Generate SQL WHERE clause from intent.
         
+        DEPRECATED: Method này không được dùng trong RAG v2 pipeline.
+        Chỉ giữ lại để backward compatibility.
+        """
         budget = intent.get("budget", 0)
-        meal_type = intent.get("meal_type", "")
         num_people = intent.get("num_people", 1)
         preferences = intent.get("preferences", [])
         
-        try:
-            llm_service = get_llm_service()
-            sql = llm_service.generate_sql_where_clause(
-                budget=budget,
-                meal_type=meal_type,
-                num_people=num_people,
-                preferences=preferences
-            )
-            print(f"[SQL] Generated: {sql[:200]}")
-            return sql
-        except Exception as e:
-            print(f"[SQL] Generation failed: {e}, using fallback")
-            return self._fallback_sql(budget, num_people, preferences)
+        # Không dùng LLM nữa, chỉ dùng fallback SQL
+        print("[SQL] Using fallback SQL (LLM SQL generation deprecated)")
+        return self._fallback_sql(budget, num_people, preferences)
     
     def _fallback_sql(self, budget: int, num_people: int, preferences: List[str]) -> str:
         """Fallback SQL generation - only basic filters when LLM fails.

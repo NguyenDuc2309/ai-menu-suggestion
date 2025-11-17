@@ -69,9 +69,12 @@ async def suggest_menu(request: Request, menu_request: MenuRequest) -> MenuRespo
             "user_id": user_id,
             "previous_dishes": previous_dishes,
             "intent": {},
-            "available_ingredients": [],
-            "combination_rules": [],
+            "rag_recipes": [],  # RAG v2: Recipes from Vector DB
+            "available_products": {},  # RAG v2: Products dict với ID: {prod_id: {"id": "...", "name": "...", "price": ...}}
+            "available_ingredients": [],  # DEPRECATED: kept for backward compatibility
+            "combination_rules": [],  # DEPRECATED: kept for backward compatibility
             "generated_menu": {},
+            "out_of_stock_ingredients": [],  # RAG v2: Out of stock tracking
             "final_response": None,
             "error": None,
             "iteration_count": 0,
@@ -146,11 +149,17 @@ async def suggest_menu(request: Request, menu_request: MenuRequest) -> MenuRespo
             "process_time": round(total_time, 3)
         }
         
-        # Format menu dishes and recalculate prices from available ingredients
-        available_ingredients = final_state.get("available_ingredients", [])
-        available_map = {
-            ing["name"].lower(): ing for ing in available_ingredients
-        }
+        # Format menu dishes và dùng product_id để lấy giá chính xác
+        # Load products từ mockupData.json để lấy giá chính xác
+        from app.services.query_tool import get_query_tool
+        query_tool = get_query_tool()
+        all_products = query_tool._load_mockup_data()
+        
+        # Tạo map: product_id → product data
+        price_map_by_id = {p.get("id", ""): p for p in all_products}
+        
+        # Lấy available_products từ state để có thông tin đầy đủ
+        available_products = final_state.get("available_products", {})
         
         menu_dishes = []
         for item in menu_items_list:
@@ -158,26 +167,32 @@ async def suggest_menu(request: Request, menu_request: MenuRequest) -> MenuRespo
             dish_total_price = 0
             
             for ing in item.get("ingredients", []):
-                ing_name = ing["name"]
-                ing_name_lower = ing_name.lower()
+                ing_product_id = ing.get("product_id", "")
                 ing_quantity = ing.get("quantity", 0)
                 ing_unit = ing.get("unit", "g")
                 
-                # Recalculate price from available ingredients
-                # base_price in mock_ingredients.json is price per unit
-                if ing_name_lower in available_map:
-                    available_ing = available_map[ing_name_lower]
-                    base_price = available_ing["base_price"]  # price per unit
+                # Lấy giá từ mockupData.json theo product_id
+                if ing_product_id in price_map_by_id:
+                    product = price_map_by_id[ing_product_id]
+                    base_price = product.get("base_price", product.get("salePrice", product.get("price", 0)))
                     calculated_price = base_price * ing_quantity
+                    product_name = available_products.get(ing_product_id, {}).get("name") or product.get("name", "")
+                elif ing_product_id in available_products:
+                    # Nếu có trong available_products nhưng không có trong mockupData
+                    prod_info = available_products[ing_product_id]
+                    base_price = prod_info.get("price", 0)
+                    calculated_price = base_price * ing_quantity
+                    product_name = prod_info.get("name", "")
                 else:
-                    # Không cho phép sử dụng nguyên liệu không có trong stock
-                    error_msg = f"Menu uses ingredient not in available stock: {ing_name}"
+                    # CRITICAL: Ingredient đã được validate ở queryAndGenerate, không nên xảy ra
+                    error_msg = f"Menu uses ingredient not in available stock: product_id={ing_product_id}"
                     print(f"[REQUEST] CRITICAL: {error_msg}")
+                    print(f"[REQUEST] Available product_ids: {list(available_products.keys())[:10]}...")
                     raise HTTPException(status_code=500, detail=error_msg)
                 
                 ingredients.append(
                     IngredientItem(
-                        name=ing_name,
+                        name=product_name,
                         quantity=ing_quantity,
                         unit=ing_unit,
                         price=round(calculated_price)

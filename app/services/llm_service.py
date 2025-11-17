@@ -8,7 +8,11 @@ from langchain.prompts import ChatPromptTemplate
 from langchain.schema import HumanMessage, SystemMessage
 from google.api_core import exceptions as google_exceptions
 from app.config import config
-from app.prompts import PARSE_INTENT_PROMPT, GENERATE_MENU_PROMPT, ADJUST_MENU_PROMPT, SQL_WHERE_CLAUSE_PROMPT
+from app.prompts import (
+    PARSE_INTENT_PROMPT, 
+    GENERATE_MENU_PROMPT,
+    ADJUST_MENU_FROM_RAG_PROMPT
+)
 
 
 def clean_json_string(content: str) -> str:
@@ -267,54 +271,10 @@ class LLMService:
                 raise ValueError(f"API authentication error: {str(e)}")
             raise ValueError(f"Failed to parse intent: {str(e)}")
     
-    def generate_sql_where_clause(
-        self,
-        budget: int,
-        meal_type: str,
-        num_people: int,
-        preferences: List[str]
-    ) -> str:
-        """Generate SQL WHERE clause from intent to filter ingredients."""
-        preferences_str = ", ".join(preferences) if preferences else "none"
-        
-        prompt = ChatPromptTemplate.from_messages([
-            HumanMessage(content=SQL_WHERE_CLAUSE_PROMPT.format(
-                budget=budget,
-                meal_type=meal_type,
-                num_people=num_people,
-                preferences=preferences_str
-            ))
-        ])
-        
-        try:
-            print("[LLM] generate_sql_where_clause: Invoking LLM...")
-            response = self.llm.invoke(prompt.format_messages())
-            
-            if not hasattr(response, 'content') or response.content is None:
-                raise ValueError("LLM response has no content")
-            
-            content = response.content.strip()
-            
-            # Clean up response
-            content = re.sub(r'```(?:sql)?\s*', '', content)
-            content = re.sub(r'WHERE\s+', '', content, flags=re.IGNORECASE)
-            content = content.strip('`').strip()
-            
-            print(f"[LLM] generate_sql_where_clause: {content[:150]}")
-            return content
-            
-        except google_exceptions.ResourceExhausted as e:
-            print(f"[LLM] generate_sql_where_clause: ResourceExhausted")
-            raise ValueError(f"API quota exceeded: {str(e)}")
-        except Exception as e:
-            error_str = str(e).lower()
-            error_type = type(e).__name__
-            print(f"[LLM] Error generating SQL ({self.provider}): {error_type}: {e}")
-            if ("quota" in error_str or "429" in error_str or "resourceexhausted" in error_str):
-                raise ValueError(f"API quota exceeded: {str(e)}")
-            if ("api key" in error_str or "unauthorized" in error_str or "401" in error_str):
-                raise ValueError(f"API authentication error: {str(e)}")
-            raise ValueError(f"Failed to generate SQL: {str(e)}")
+    # DEPRECATED: SQL generation không dùng trong RAG v2 pipeline
+    # Method này chỉ được dùng trong query_tool mà query_tool không được gọi trong pipeline mới
+    # def generate_sql_where_clause(...):
+    #     pass
     
     def generate_menu(
         self,
@@ -521,6 +481,239 @@ CHỈ DÙNG NGUYÊN LIỆU CÓ TRONG DANH SÁCH. KHÔNG TỰ TẠO THÊM."""
                 "401" in error_str or "authentication" in error_str or error_type == "AuthenticationError"):
                 raise ValueError(f"API authentication error: {str(e)}")
             raise ValueError(f"Failed to adjust menu: {str(e)}")
+    
+    def generate_menu_from_rag(
+        self,
+        rag_recipes: List[str],
+        meal_type: str,
+        num_people: int,
+        budget: float,
+        previous_dishes: List[str] = None,
+        budget_specified: bool = True,
+        preferences: List[str] | None = None,
+    ) -> Dict[str, Any]:
+        """Generate menu from RAG recipes (RAG v2).
+        
+        Args:
+            rag_recipes: List of recipe documents from RAG
+            meal_type: Type of meal
+            num_people: Number of people
+            budget: Budget in VND
+            previous_dishes: List of previous dishes to avoid
+            budget_specified: Whether user specified budget
+            preferences: User preferences
+        
+        Returns:
+            Menu JSON
+        """
+        rag_recipes_text = "\n\n".join([f"--- Recipe {i+1} ---\n{recipe}" for i, recipe in enumerate(rag_recipes)])
+        
+        if preferences:
+            preferences_text = ", ".join(preferences)
+        else:
+            preferences_text = "Không có (user không yêu cầu cụ thể)."
+        
+        if previous_dishes and len(previous_dishes) > 0:
+            dishes_list = ", ".join(previous_dishes)
+            previous_dishes_text = f"""🔔 TRÁNH LẶP MÓN:
+Món đã gợi ý gần đây: {dishes_list}
+→ Chọn món KHÁC từ RAG recipes!"""
+        else:
+            previous_dishes_text = "Chưa có lịch sử món ăn."
+        
+        if not budget_specified:
+            budget_context = f"""⚠️ Người dùng KHÔNG nhập ngân sách.
+→ Hệ thống đặt ngân sách {budget:,.0f} VND phù hợp với loại bữa.
+→ Menu KHÔNG vượt {budget:,.0f} VND."""
+        else:
+            budget_context = f"""✓ Người dùng yêu cầu ngân sách {budget:,.0f} VND.
+→ Chọn món để tổng giá khoảng 70-85% budget."""
+        
+        prompt = ChatPromptTemplate.from_messages([
+            HumanMessage(content=GENERATE_MENU_FROM_RAG_PROMPT.format(
+                meal_type=meal_type,
+                num_people=num_people,
+                preferences_text=preferences_text,
+                previous_dishes_text=previous_dishes_text,
+                budget_context=budget_context,
+                rag_recipes_text=rag_recipes_text
+            ))
+        ])
+        
+        try:
+            print("[LLM] generate_menu_from_rag: Invoking LLM...")
+            response = self.llm.invoke(prompt.format_messages())
+            
+            if not hasattr(response, 'content') or response.content is None:
+                raise ValueError("LLM response has no content")
+            
+            content = response.content.strip()
+            print(f"[LLM] generate_menu_from_rag response (first 500 chars): {content[:500]}")
+            
+            menu = parse_json_with_fallback(content, "generate_menu_from_rag")
+            
+            if not isinstance(menu, dict):
+                raise ValueError(f"Parsed JSON is not a dictionary: {type(menu)}")
+            if "items" not in menu:
+                raise ValueError(f"Menu JSON missing 'items' key. Keys: {list(menu.keys())}")
+            
+            return menu
+        except Exception as e:
+            error_msg = str(e)
+            error_str = error_msg.lower()
+            print(f"[LLM] generate_menu_from_rag failed: {error_msg}")
+            if ("quota" in error_str or "429" in error_str or "resourceexhausted" in error_str):
+                raise ValueError(f"API quota exceeded: {error_msg}")
+            if ("api key" in error_str or "unauthorized" in error_str or "401" in error_str):
+                raise ValueError(f"API authentication error: {error_msg}")
+            raise ValueError(f"Failed to generate menu from RAG: {error_msg}")
+    
+    def adjust_menu_from_rag(
+        self,
+        menu: Dict[str, Any],
+        rag_recipes: List[str],
+        validation_errors: List[str],
+        out_of_stock: List[str],
+        budget: float,
+        needs_enhancement: bool = False
+    ) -> Dict[str, Any]:
+        """Adjust menu using RAG recipes (RAG v2).
+        
+        Args:
+            menu: Current menu to adjust
+            rag_recipes: RAG recipes to use for replacement
+            validation_errors: List of validation errors
+            out_of_stock: List of out of stock ingredients
+            budget: Budget in VND
+            needs_enhancement: Whether to enhance menu
+        
+        Returns:
+            Adjusted menu JSON
+        """
+        errors_text = "\n".join([f"- {err}" for err in validation_errors])
+        rag_recipes_text = "\n\n".join([f"--- Recipe {i+1} ---\n{recipe}" for i, recipe in enumerate(rag_recipes)])
+        out_of_stock_text = ", ".join(out_of_stock) if out_of_stock else "Không có"
+        
+        prompt_content = ADJUST_MENU_FROM_RAG_PROMPT.format(
+            menu=menu,
+            errors_text=errors_text,
+            rag_recipes_text=rag_recipes_text,
+            out_of_stock=out_of_stock_text,
+            budget=budget
+        )
+        
+        prompt = ChatPromptTemplate.from_messages([
+            HumanMessage(content=prompt_content)
+        ])
+        
+        try:
+            response = self.llm.invoke(prompt.format_messages())
+            
+            if not hasattr(response, 'content') or response.content is None:
+                raise ValueError("LLM response has no content")
+            
+            content = response.content.strip()
+            print(f"[LLM] adjust_menu_from_rag response (first 500 chars): {content[:500]}")
+            
+            adjusted_menu = parse_json_with_fallback(content, "adjust_menu_from_rag")
+            
+            if not isinstance(adjusted_menu, dict):
+                raise ValueError(f"Parsed JSON is not a dictionary: {type(adjusted_menu)}")
+            if "items" not in adjusted_menu:
+                raise ValueError(f"Menu JSON missing 'items' key. Keys: {list(adjusted_menu.keys())}")
+            
+            return adjusted_menu
+        except Exception as e:
+            error_msg = str(e)
+            error_str = error_msg.lower()
+            print(f"[LLM] adjust_menu_from_rag failed: {error_msg}")
+            if ("quota" in error_str or "429" in error_str or "resourceexhausted" in error_str):
+                raise ValueError(f"API quota exceeded: {error_msg}")
+            if ("api key" in error_str or "unauthorized" in error_str or "401" in error_str):
+                raise ValueError(f"API authentication error: {error_msg}")
+            raise ValueError(f"Failed to adjust menu from RAG: {error_msg}")
+    
+    def generate_menu_from_products(
+        self,
+        products_dict: Dict[str, Dict[str, Any]],
+        combination_rules: str,
+        meal_type: str,
+        num_people: int,
+        budget: float,
+        previous_dishes: List[str] = None,
+        budget_specified: bool = True,
+        preferences: List[str] | None = None,
+    ) -> Dict[str, Any]:
+        """Generate menu from products dict (with ID) + combination rules.
+        
+        New RAG v2 approach:
+        - Products dict from vector store: {prod_id: {"id": "...", "name": "...", "price": ...}}
+        - Combination rules for Vietnamese cuisine
+        - LLM combines them to create menu using product_id
+        """
+        # Format products as numbered list với ID làm định danh
+        products_text = "\n".join([
+            f"{i+1}. {prod_id}: {prod_info['name']} - {prod_info['price']:,} VND"
+            for i, (prod_id, prod_info) in enumerate(sorted(products_dict.items()), 1)
+        ])
+        
+        if preferences:
+            preferences_text = ", ".join(preferences)
+        else:
+            preferences_text = "Không có"
+        
+        if previous_dishes and len(previous_dishes) > 0:
+            dishes_list = ", ".join(previous_dishes)
+            previous_dishes_text = f"Đã ăn: {dishes_list}\n→ Chọn món KHÁC!"
+        else:
+            previous_dishes_text = "Chưa có lịch sử"
+        
+        if not budget_specified:
+            budget_context = f"Ngân sách tự động: {budget:,.0f} VND (không vượt quá)"
+        else:
+            budget_context = f"Ngân sách yêu cầu: {budget:,.0f} VND (dùng 70-85%)"
+        
+        prompt = ChatPromptTemplate.from_messages([
+            HumanMessage(content=GENERATE_MENU_PROMPT.format(
+                meal_type=meal_type,
+                num_people=num_people,
+                budget=budget,
+                preferences_text=preferences_text,
+                previous_dishes_text=previous_dishes_text,
+                budget_context=budget_context,
+                products_text=products_text,
+                combination_rules=combination_rules
+            ))
+        ])
+        
+        try:
+            print("[LLM] generate_menu_from_products: Invoking LLM...")
+            response = self.llm.invoke(prompt.format_messages())
+            
+            if not hasattr(response, 'content') or response.content is None:
+                raise ValueError("LLM response has no content")
+            
+            content = response.content.strip()
+            # Log nhiều hơn để debug prompt / response
+            print(f"[LLM] generate_menu_from_products response (first 2000 chars): {content[:2000]}")
+            
+            menu = parse_json_with_fallback(content, "generate_menu_from_products")
+            
+            if not isinstance(menu, dict):
+                raise ValueError(f"Not a dict: {type(menu)}")
+            if "items" not in menu:
+                raise ValueError(f"Missing 'items' key")
+            
+            return menu
+        except Exception as e:
+            error_msg = str(e)
+            error_str = error_msg.lower()
+            print(f"[LLM] generate_menu_from_products failed: {error_msg}")
+            if "quota" in error_str or "429" in error_str:
+                raise ValueError(f"API quota exceeded")
+            if "api key" in error_str or "401" in error_str:
+                raise ValueError(f"API auth error")
+            raise ValueError(f"Failed to generate menu: {error_msg}")
 
 
 _llm_service: LLMService = None
